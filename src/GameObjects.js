@@ -1,13 +1,14 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { SUBTRACTION, INTERSECTION, Brush, Evaluator } from 'three-bvh-csg';
-import { ParticleSystem } from './Particles';
+import { ParticleSystem } from './Particles.js';
+import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
 
 
 export class World {
     constructor() {
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x0f0f0f);
+        this.clearColor = new THREE.Color(0x0f0f0f);
 
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
         this.camera.position.set(0, 0, 10);
@@ -60,18 +61,12 @@ export class World {
 
     splitAsteroid(asteroid, laser) {
         const dir = new THREE.Vector3(laser.userData.velocity.x, laser.userData.velocity.y, 0).normalize();
-        const boxSize = 1.5 * asteroid.userData.diameter;
+        const boxSize = 2.0 * asteroid.userData.diameter;
 
         const cutterGeo = buildNoisyCutter(boxSize);
         cutterGeo.translate(0.5 * boxSize, 0.0, 0.0);
         const laserRotation = Math.atan2(laser.userData.velocity.y, laser.userData.velocity.x);
         cutterGeo.rotateZ(laserRotation + 0.5 * Math.PI);
-
-        // const cutter = new THREE.Mesh(cutterGeo, new THREE.MeshStandardMaterial({ color: 0xff0000 }));
-        // cutter.position.copy(laser.position);
-        // cutter.position.addScaledVector(dir, 0.5 * asteroid.userData.diameter);
-        // scene.add(cutter);
-        // return;
 
         const brush1 = new Brush(asteroid.geometry);
         brush1.position.copy(asteroid.position);
@@ -90,7 +85,14 @@ export class World {
 
         let sign = 1;
         [A, B].forEach(brush => {
-            const geo = BufferGeometryUtils.mergeVertices(brush.geometry, 0.01);
+            // printDuplicateTriangles(brush.geometry);
+
+            const cleanGeo = new GeometryManipulator(BufferGeometryUtils.mergeVertices(brush.geometry, 0.0001)).splitTrianglesOnTouchingVertices();
+            // TODO replace with simplifyGeometry
+            const geo = BufferGeometryUtils.mergeVertices(cleanGeo, 0.01);
+
+            // printCollapsedTriangles(geo);
+
             geo.translate(-asteroid.position.x, -asteroid.position.y, -asteroid.position.z);
             geo.computeBoundingBox();
             const t = geo.boundingBox.getCenter(new THREE.Vector3());
@@ -102,6 +104,9 @@ export class World {
             mesh.userData.rotationalVelocity = new THREE.Vector2((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3);
             mesh.userData.diameter = getDiameter(geo);
             sign *= -1;
+
+            mesh.geometry.setIndex(new GeometryManipulator(geo).removeCollapsedTriangles());
+            geo.computeVertexNormals();
 
             this.scene.add(mesh);
             this.asteroids.push(mesh);
@@ -115,11 +120,12 @@ export class World {
 
 const defaultAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
 
-function createAsteroid(radius = 0.9) {
+export function createAsteroid(radius = 0.9) {
     let geo = new THREE.IcosahedronGeometry(radius, 2);
     geo.deleteAttribute('normal');
     geo.deleteAttribute('uv');
-    geo = BufferGeometryUtils.mergeVertices(geo, 0.01);
+    // TODO replace with simplifyGeometry / reduce tolerance
+    geo = BufferGeometryUtils.mergeVertices(geo, 0.09);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
         const v = new THREE.Vector3().fromBufferAttribute(pos, i);
@@ -187,12 +193,6 @@ function createCrackPlane(width = 1.0, height = 1.0, segments = 20, amplitude = 
             continue;
         }
 
-        // // Crack-shaped noise: concentrated displacement around a centerline
-        // const d = Math.abs(x); // distance from vertical center
-        // const falloff = Math.exp(-d * 5); // sharp ridge at center
-
-        // const noise = 1.0 * (Math.random() - 0.5) * falloff;
-
         const noise = amplitude * (Math.random() - 0.5);
 
         pos.setZ(i, noise); // displace along Z-axis
@@ -224,19 +224,58 @@ export function checkLaserHit(laser, asteroids) {
 
 function getDiameter(geometry) {
     const pos = geometry.attributes.position;
-    let maxDist = 0;
+    let maxDistSq = 0;
     for (let i = 0; i < pos.count; i++) {
-        const x1 = pos.getX(i);
-        const y1 = pos.getY(i);
+        const p1 = new THREE.Vector3().fromBufferAttribute(pos, i);
         for (let j = 0; j < i; j++) {
-            const x2 = pos.getX(j);
-            const y2 = pos.getY(j);
-            const dist = Math.hypot(x2 - x1, y2 - y1);
-            if (dist > maxDist) {
-                maxDist = dist;
+            const p2 = new THREE.Vector3().fromBufferAttribute(pos, j);
+            const distSq = p2.sub(p1).lengthSq();
+            if (distSq > maxDistSq) {
+                maxDistSq = distSq;
             }
         }
     }
-    return maxDist;
+    return Math.sqrt(maxDistSq);
 }
 
+
+const defaultNibbleRadius = 0.15;
+const defaultNibbleDepth = 0.05;
+const defaultNibbleGeometry = new THREE.IcosahedronGeometry(defaultNibbleRadius, 0);
+
+export function nibbleAsteroid(asteroid, intersection, rx = null, ry = null, rz = null) {
+    const brush1 = new Brush(asteroid.geometry);
+    const brush2 = new Brush(defaultNibbleGeometry);
+    const negativeNormalizedImpact = intersection.impact.clone().normalize().multiplyScalar(-1);
+    brush2.position.copy(asteroid.worldToLocal(
+        intersection.point.clone().add(negativeNormalizedImpact.multiplyScalar(defaultNibbleRadius - defaultNibbleDepth))
+    ));
+    rx = rx || Math.random() * 2 * Math.PI;
+    ry = ry || Math.random() * 2 * Math.PI;
+    rz = rz || Math.random() * 2 * Math.PI;
+
+    brush2.rotation.set(rx, ry, rz);
+    brush2.updateMatrixWorld();
+
+    const evaluator = new Evaluator();
+    evaluator.attributes = ["position"];
+    const result = evaluator.evaluate(brush1, brush2, SUBTRACTION);
+    let geo = result.geometry;
+
+    // printDuplicateTriangles(geo);
+
+    simplifyGeometry(geo, 0.0001);
+
+    // printDuplicateTriangles(geo);
+
+    geo = new GeometryManipulator(geo).splitTrianglesOnTouchingVertices();
+
+    // printDuplicateTriangles(geo);  // <-- TODO this happens
+
+    simplifyGeometry(geo, 0.04);
+
+    // printDuplicateTriangles(geo);
+
+    geo.computeVertexNormals();
+    asteroid.geometry = geo;
+}

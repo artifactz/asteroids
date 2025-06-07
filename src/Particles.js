@@ -8,24 +8,32 @@ export class ParticleSystem {
         this.lights = [];
     }
 
-    handleDefaultImpact(point, normal, velocity, divertAngle = 0.3 * Math.PI, minLifetime = 0.333, maxLifetime = 1.0, minFadeoutRatio = 0.333, maxFadeoutRatio = 1.0) {
-        const reflection = reflect(normal, velocity);
+    handleDefaultImpact(intersection, asteroid, divertAngle = 0.3 * Math.PI, minLifetime = 0.333, maxLifetime = 1.0, minFadeoutRatio = 0.333, maxFadeoutRatio = 1.0) {
+        const reflection = reflect(intersection.normal, intersection.impact);
         const noisyReflection = randomWiggleVector3(reflection, divertAngle);
-        const velocities = [];
+        const sparkVelocities = [];
         for (let i = 0; i < 10; i++) {
             const lifetime = minLifetime + (maxLifetime - minLifetime) * Math.random();
             const fadeoutRatio = minFadeoutRatio + (maxFadeoutRatio - minFadeoutRatio) * Math.random();
-            const velocity = this.addParticleChunk(point, noisyReflection, 40, lifetime, fadeoutRatio * lifetime);
-            velocities.push(velocity.x, velocity.y, velocity.z);
+            const { positions, velocities } = this.generateSparks(intersection.point, noisyReflection, 40);
+            this.addParticleChunk(positions, velocities, lifetime, fadeoutRatio * lifetime, 0xffcc66);
+
+            const velocity = getMeanVector3(velocities);
+            sparkVelocities.push(velocity.x, velocity.y, velocity.z);
         }
-        const meanVelocity = getMeanVector3(velocities);
-        this.addLight(point, meanVelocity, maxLifetime, maxLifetime - minLifetime);
+
+        const meanVelocity = getMeanVector3(sparkVelocities);
+        this.addLight(intersection.point, meanVelocity, maxLifetime, maxLifetime - minLifetime);
+
+        const objPointVel = getRotatedPointVelocity(intersection.point, asteroid);
+        const awayFromCenter = intersection.point.clone().sub(asteroid.position).normalize();
+        const generalDirection = objPointVel.add(awayFromCenter.multiplyScalar(0.2));
+        const { positions, velocities } = this.generateDebris(intersection.point, generalDirection, 100, 0.2);
+        this.addParticleChunk(positions, velocities, 3.0, 2.0, 0x555555, THREE.NormalBlending, undefined, true);
     }
 
-    addParticleChunk(position, direction, count, lifetime, fadeoutTime, spreadAngle = 0.25 * Math.PI, minSpeedRatio = 0.0667, maxSpeedRatio = 0.333) {
+    generateSparks(position, direction, count, spreadAngle = 0.25 * Math.PI, minSpeedRatio = 0.0667, maxSpeedRatio = 0.333) {
         const basePolar = toPolar(direction);
-
-        const geometry = new THREE.BufferGeometry();
         const positions = [];
         const velocities = [];
 
@@ -39,25 +47,48 @@ export class ParticleSystem {
             velocities.push(dir.x, dir.y, dir.z);
         }
 
+        return {positions, velocities};
+    }
+
+    generateDebris(position, direction, count, randomSpeed = 0.1) {
+        const positions = [];
+        const velocities = [];
+
+        for (let i = 0; i < count; i++) {
+            const dir = { ...direction };
+            dir.x += randomSpeed * getBiRandom();
+            dir.y += randomSpeed * getBiRandom();
+            dir.z += randomSpeed * getBiRandom();
+
+            positions.push(position.x, position.y, position.z);
+            velocities.push(dir.x, dir.y, dir.z);
+        }
+
+        return {positions, velocities};
+    }
+
+    addParticleChunk(positions, velocities, lifetime, fadeoutTime, color, blending = THREE.AdditiveBlending, size = 0.025, blur = false) {
+        const geometry = new THREE.BufferGeometry();
         geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
         geometry.setAttribute("velocity", new THREE.Float32BufferAttribute(velocities, 3));
 
         const material = new THREE.PointsMaterial({
-            color: 0xffcc66,
-            size: 0.025,
+            color: color,
+            size: size,
             transparent: true,
             opacity: 1,
             depthWrite: false,
-            blending: THREE.AdditiveBlending
+            blending: blending
         });
 
         const particles = new THREE.Points(geometry, material);
         particles.userData = { lifetime, fadeoutTime, age: 0 };
+        if (blur) {
+            particles.layers.enable(1);  // blur layer
+        }
 
         this.scene.add(particles);
         this.particleChunks.push(particles);
-
-        return getMeanVector3(velocities);
     }
 
     addLight(position, velocity, lifetime, fadeoutTime) {
@@ -177,4 +208,15 @@ function getMeanVector3(arr) {
     }
 
     return new THREE.Vector3(sumX / count, sumY / count, sumZ / count);
+}
+
+function getRotatedPointVelocity(point, obj, resolution = 0.01) {
+    const transformedPoint = point.clone().sub(obj.position);
+    transformedPoint.applyAxisAngle(new THREE.Vector3(1, 0, 0), resolution * obj.userData.rotationalVelocity.x);
+    transformedPoint.applyAxisAngle(new THREE.Vector3(0, 1, 0), resolution * obj.userData.rotationalVelocity.y);
+    transformedPoint.x += resolution * obj.userData.velocity.x + obj.position.x;
+    transformedPoint.y += resolution * obj.userData.velocity.y + obj.position.y;
+    transformedPoint.z += obj.position.z;
+    const velocity = transformedPoint.clone().sub(point).multiplyScalar(1 / resolution);
+    return velocity;
 }
