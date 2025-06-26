@@ -8,15 +8,11 @@ import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCo
 export class World {
     constructor() {
         this.scene = new THREE.Scene();
-        this.clearColor = new THREE.Color(0x0f0f0f);
+        this.clearColor = new THREE.Color(0x000000);
 
-        this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        this.camera.position.set(0, 0, 10);
-        this.camera.up.set(0, 1, 0);
-        this.camera.lookAt(0, 0, 0);
-        
+        this.camera = this.createCamera();
         this.addDefaultLights();
-
+        this.addPreliminaryBackground();
         this.player = createPlayer();
         this.scene.add(this.player);
 
@@ -28,12 +24,31 @@ export class World {
         this.particles = new ParticleSystem(this.scene);
     }
 
+    createCamera() {
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 10);
+        camera.up.set(0, 1, 0);
+        camera.lookAt(0, 0, 0);
+        camera.userData.slackPerSecond = 0.001;
+        return camera;
+    }
+
     addDefaultLights() {
         const dLight = new THREE.DirectionalLight(0xffffff, 1);
         dLight.position.set(5, 5, 10);
         const aLight = new THREE.AmbientLight(0x707070);
         this.scene.add(dLight);
         this.scene.add(aLight);
+    }
+
+    addPreliminaryBackground() {
+        this.scene.add(createUniverse());
+        this.scene.add(createUniverse2());
+        this.scene.add(createUniverse3());
+        this.scene.add(createUniverse4());
+        this.scene.add(createUniverse5());
+        this.brightStar = createUniverse6();
+        this.scene.add(this.brightStar);
     }
 
     createLaser(position, angle, speed = 14.4, length = 0.5, radius = 0.02, ttl = 3) {
@@ -155,6 +170,138 @@ export function createPlayer() {
     player.userData.speed = 4.2;
     player.userData.rotationalSpeed = 4.2;
     return player;
+}
+
+function createUniverse() {
+    const geo = new THREE.PlaneGeometry(300, 300);
+    const texture = generateStarTexture({ minRadius: 1.2, maxRadius: 1.5, starCount: 100 });
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const universe = new THREE.Mesh(geo, material);
+    universe.position.z = -140;
+    return universe;
+}
+
+function createUniverse2() {
+    const geo = new THREE.PlaneGeometry(600, 600);
+    const texture = generateStarTexture({ minRadius: 0.8, maxRadius: 1.2, starCount: 800 });
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const universe = new THREE.Mesh(geo, material);
+    universe.position.z = -210;
+    return universe;
+}
+
+function createUniverse3() {
+    const geo = new THREE.PlaneGeometry(900, 900);
+    const texture = generateStarTexture({
+        minRadius: 0.45, maxRadius: 0.8, starCount: 1200,
+        minRed: 100, maxRed: 255,
+        minGreen: 175, maxGreen: 175,
+        minBlue: 100, maxBlue: 255,
+    });
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const universe = new THREE.Mesh(geo, material);
+    universe.position.z = -300;
+    return universe;
+}
+
+function createUniverse4() {
+    const geo = new THREE.PlaneGeometry(1200, 1200);
+    const texture = generateStarTexture({
+        minRadius: 0.25, maxRadius: 0.45, starCount: 10000, minBrightness: 0.3, maxBrightness: 1.0,
+        minRed: 100, maxRed: 255,
+        minGreen: 160, maxGreen: 175,
+        minBlue: 100, maxBlue: 255,
+    });
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const universe = new THREE.Mesh(geo, material);
+    universe.position.z = -400;
+    return universe;
+}
+
+function createUniverse5(starCount = 2500, minZ = -350, maxZ = -90) {
+    const positions = [];
+
+    for (let i = 0; i < starCount; i++) {
+        const z = minZ + Math.random() * (maxZ - minZ);
+        const x = -z * 3.5 * (Math.random() - 0.5)
+        const y = -z * 3.5 * (Math.random() - 0.5)
+        positions.push(x, y, z);
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+
+    const material = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 0.5,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+    });
+
+    const stars = new THREE.Points(geometry, material);
+
+    return stars;
+}
+
+function createUniverse6() {
+    const geo = new THREE.PlaneGeometry(55, 55);
+    const textureLoader = new THREE.TextureLoader()
+    const texture = textureLoader.load('/media/bright_star.png');
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const universe = new THREE.Mesh(geo, material);
+    universe.position.set(10, 15, -50);
+    return universe;
+}
+
+function generateStarTexture({
+    size = 1536,
+    starCount = 500,
+    minRadius = 0.5,
+    maxRadius = 2.5,
+    minBrightness = 0.8,
+    maxBrightness = 1.0,
+    minRed = 255,
+    maxRed = 255,
+    minGreen = 255,
+    maxGreen = 255,
+    minBlue = 255,
+    maxBlue = 255,
+    bgColor = "black",
+} = {}) {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+
+    const ctx = canvas.getContext("2d");
+
+    // Background
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, size, size);
+
+    // Draw stars
+    for (let i = 0; i < starCount; i++) {
+        const x = Math.random() * size;
+        const y = Math.random() * size;
+        const radius = minRadius + Math.random() * (maxRadius - minRadius);
+
+        const alpha = minBrightness + Math.random() * (maxBrightness - minBrightness);
+
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        const r = minRed + Math.random() * (maxRed - minRed);
+        const g = minGreen + Math.random() * (maxGreen - minGreen);
+        const b = minBlue + Math.random() * (maxBlue - minBlue);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        ctx.fill();
+    }
+
+    return new THREE.CanvasTexture(canvas);
 }
 
 function buildNoisyCutter(boxSize, resolution = 15, amplitude = 0.1) {
