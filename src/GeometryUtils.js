@@ -318,7 +318,7 @@ class HashTriangles {
     }
 }
 
-function* iterateTriangles(geometry) {
+export function* iterateTriangles(geometry) {
     if (geometry.index) {
         const indices = geometry.index.array;
         for (let i = 0; i < indices.length; i += 3) {
@@ -337,6 +337,13 @@ function pointToSegmentDistanceSquared(p, a, b) {
     const t = THREE.MathUtils.clamp(ap.dot(ab) / ab.lengthSq(), 0, 1);
     const closest = new THREE.Vector3().copy(ab).multiplyScalar(t).add(a);
     return p.distanceToSquared(closest);
+}
+
+export function pointToLineDistanceSquared(point, origin, direction) {
+    const originToPoint = new THREE.Vector3().subVectors(point, origin);
+    const t = originToPoint.dot(direction) / direction.lengthSq();
+    const closest = origin.clone().addScaledVector(direction, t);
+    return point.distanceToSquared(closest);
 }
 
 export function simplifyGeometry(geometry, resolution = 0.01) {
@@ -385,6 +392,57 @@ export function simplifyGeometry(geometry, resolution = 0.01) {
 
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPos), 3));
     geometry.setIndex(hashTriangles.getIndex());
+}
+
+export class SurfaceSampler {
+    constructor(geometry) {
+        this.geometry = geometry;
+        const pos = geometry.attributes.position;
+        this.positions = [];
+        for (let i = 0; i < pos.count; i++) {
+            const position = new THREE.Vector3().fromBufferAttribute(pos, i);
+            this.positions.push(position);
+        }
+        this.triangles = [];
+        for (const [i1, i2, i3] of iterateTriangles(geometry)) {
+            const triangle = [this.positions[i1], this.positions[i2], this.positions[i3]];
+            this.triangles.push(triangle);
+        }
+        this.triangleAreas = this.triangles.map((triangle) => {
+            const a = triangle[0], b = triangle[1], c = triangle[2];
+            const ab = new THREE.Vector3().subVectors(b, a);
+            const ac = new THREE.Vector3().subVectors(c, a);
+            return 0.5 * ab.cross(ac).length();
+        });
+        this.totalArea = this.triangleAreas.reduce((sum, area) => sum + area, 0);
+    }
+
+    getRandomPoint() {
+        // Choose triangle with probability proportional to its area  TODO could sort by area (descending) first
+        const randomArea = Math.random() * this.totalArea;
+        let cumulativeArea = 0;
+        let triangleIndex = 0;
+        for (; triangleIndex < this.triangleAreas.length; triangleIndex++) {
+            cumulativeArea += this.triangleAreas[triangleIndex];
+            if (cumulativeArea >= randomArea) {
+                break;
+            }
+        }
+
+        const [a, b, c] = this.triangles[triangleIndex];
+        // Generate random barycentric coordinates
+        const u = Math.random();
+        const v = Math.random() * (1 - u);
+        const w = 1 - u - v;
+        // Compute the random point on the triangle
+        const randomPoint = new THREE.Vector3()
+            .copy(a)
+            .multiplyScalar(u)
+            .addScaledVector(b, v)
+            .addScaledVector(c, w);
+
+        return randomPoint;
+    }
 }
 
 export function printDuplicateTriangles(geometry) {

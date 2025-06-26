@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { SUBTRACTION, INTERSECTION, Brush, Evaluator } from 'three-bvh-csg';
+import { SUBTRACTION, INTERSECTION, Brush, Evaluator, computeMeshVolume } from 'three-bvh-csg';
+import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
+import Ammo from 'ammo.js';
 import { ParticleSystem } from './Particles.js';
 import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
+
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 
 export class World {
@@ -16,9 +21,12 @@ export class World {
         this.player = createPlayer();
         this.scene.add(this.player);
 
-        this.asteroids = [createAsteroid()];
+        this.asteroids = [createAsteroid(createAsteroidGeometry()), createAsteroid(createAsteroidGeometry())];
         this.asteroids[0].position.set(3, 1, 0);
+        this.asteroids[1].position.set(8, 1.5, 0);
+        this.asteroids[1].userData.velocity.set(-0.7, -0.1, 0);
         this.scene.add(this.asteroids[0]);
+        this.scene.add(this.asteroids[1]);
 
         this.lasers = [];
         this.particles = new ParticleSystem(this.scene);
@@ -51,17 +59,76 @@ export class World {
         this.scene.add(this.brightStar);
     }
 
-    createLaser(position, angle, speed = 14.4, length = 0.5, radius = 0.02, ttl = 3) {
+    setPhysics(physicsWorld) {
+        this.physics = physicsWorld;
+        this.asteroids.forEach((asteroid) => {
+            this.addRigidBodyPhysics(asteroid, asteroid.userData.volume);
+        });
+    }
+
+    addRigidBodyPhysics(mesh, mass = 1) {
+        const vertices = mesh.geometry.clone().toNonIndexed().attributes.position.array;
+
+        // const ammoMesh = new Ammo.btTriangleMesh();
+
+        // for (let i = 0; i < vertices.length; i += 9) {
+        //     const v0 = new Ammo.btVector3(vertices[i], vertices[i + 1], vertices[i + 2]);
+        //     const v1 = new Ammo.btVector3(vertices[i + 3], vertices[i + 4], vertices[i + 5]);
+        //     const v2 = new Ammo.btVector3(vertices[i + 6], vertices[i + 7], vertices[i + 8]);
+        //     ammoMesh.addTriangle(v0, v1, v2, true);
+        // }
+
+        // const shape = new Ammo.btBvhTriangleMeshShape(ammoMesh, true, true);
+
+        const shape = new Ammo.btConvexHullShape();
+        shape.setMargin(0);
+        for (let i = 0; i < vertices.length; i += 3) {
+            const vertex = new Ammo.btVector3(vertices[i], vertices[i + 1], vertices[i + 2]);
+            shape.addPoint(vertex, true);
+        }
+
+        // shape.optimizeConvexHull();
+        // shape.recalcLocalAabb();
+
+        const transform = new Ammo.btTransform();
+        transform.setIdentity();
+        transform.setOrigin(new Ammo.btVector3(mesh.position.x, mesh.position.y, mesh.position.z));
+        const quaternion = new THREE.Quaternion().setFromEuler(mesh.rotation);
+        transform.setRotation(new Ammo.btQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w));
+        const motionState = new Ammo.btDefaultMotionState(transform);
+
+        const localInertia = new Ammo.btVector3(0, 0, 0);
+        shape.calculateLocalInertia(mass, localInertia);
+
+        const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, shape, localInertia);
+        const body = new Ammo.btRigidBody(rbInfo);
+
+        body.setLinearVelocity(new Ammo.btVector3(mesh.userData.velocity.x, mesh.userData.velocity.y, mesh.userData.velocity.z));
+        body.setAngularVelocity(new Ammo.btVector3(mesh.userData.rotationalVelocity.x, mesh.userData.rotationalVelocity.y, mesh.userData.rotationalVelocity.z));
+
+        body.setActivationState(4);  // DISABLE_DEACTIVATION
+
+        body.setRestitution(1.8 + 0.1 * Math.random());
+        body.setFriction(0.0);
+        body.setRollingFriction(0.0);    // resist rotation when rolling
+        body.setDamping(0.0, 0.0);
+
+        this.physics.addRigidBody(body);
+        mesh.userData.physicsBody = body;
+    }
+
+    createLaser(position, angle, speed = 14.4, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
         const geo = new THREE.CylinderGeometry(radius, radius, length);
         geo.rotateZ(Math.PI / 2);
         const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
         const laser = new THREE.Mesh(geo, mat);
         laser.rotation.z = angle;
         laser.position.set(position.x, position.y, 0);
-        laser.userData.velocity = new THREE.Vector2(Math.cos(angle), Math.sin(angle)).multiplyScalar(speed);
+        laser.userData.velocity = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(speed);
         laser.userData.length = length;
         laser.userData.radius = radius;
         laser.userData.ttl = ttl;
+        laser.userData.damage = damage;
 
         const light = new THREE.PointLight(0xff6666, 1, 20);
         light.position.copy(laser.position);
@@ -75,12 +142,12 @@ export class World {
     }
 
     splitAsteroid(asteroid, laser) {
-        const dir = new THREE.Vector3(laser.userData.velocity.x, laser.userData.velocity.y, 0).normalize();
+        const laserDirection = laser.userData.velocity.clone().normalize();
         const boxSize = 2.0 * asteroid.userData.diameter;
 
         const cutterGeo = buildNoisyCutter(boxSize);
         cutterGeo.translate(0.5 * boxSize, 0.0, 0.0);
-        const laserRotation = Math.atan2(laser.userData.velocity.y, laser.userData.velocity.x);
+        const laserRotation = Math.atan2(laserDirection.y, laserDirection.x);
         cutterGeo.rotateZ(laserRotation + 0.5 * Math.PI);
 
         const brush1 = new Brush(asteroid.geometry);
@@ -90,7 +157,7 @@ export class World {
 
         const brush2 = new Brush(cutterGeo);
         brush2.position.copy(laser.position);
-        brush2.position.addScaledVector(dir, 0.5 * asteroid.userData.diameter);
+        brush2.position.addScaledVector(laserDirection, 0.5 * asteroid.userData.diameter);
         brush2.updateMatrixWorld();
 
         const evaluator = new Evaluator();
@@ -112,30 +179,144 @@ export class World {
             geo.computeBoundingBox();
             const t = geo.boundingBox.getCenter(new THREE.Vector3());
             geo.translate(-t.x, -t.y, -t.z);
-            const mesh = new THREE.Mesh(geo, defaultAsteroidMat);
+
+            geo.setIndex(new GeometryManipulator(geo).removeCollapsedTriangles());
+            geo.computeVertexNormals();
+
+            const mesh = createAsteroid(geo);
             mesh.position.copy(asteroid.position).add(t);
 
-            mesh.userData.velocity = new THREE.Vector2(Math.cos(laserRotation - sign * 0.5 * Math.PI) * 0.15, Math.sin(laserRotation - sign * 0.5 * Math.PI) * 0.15);
-            mesh.userData.rotationalVelocity = new THREE.Vector2((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3);
-            mesh.userData.diameter = getDiameter(geo);
-            sign *= -1;
+            const parentWeight = 0.95;
+            const repellingWeight = 0.1;
+            const laserWeight = 0.04;
+            const parentLinearVel = asteroid.userData.physicsBody.getLinearVelocity();
+            const repellingVector = new THREE.Vector3(Math.cos(laserRotation - sign * 0.5 * Math.PI), Math.sin(laserRotation - sign * 0.5 * Math.PI), 0);
+            mesh.userData.velocity = new THREE.Vector3(parentLinearVel.x(), parentLinearVel.y(), parentLinearVel.z())
+                .multiplyScalar(parentWeight)
+                .addScaledVector(repellingVector, repellingWeight)
+                .addScaledVector(laserDirection, laserWeight);
+            mesh.userData.velocity.z = 0.2 * -Math.sign(mesh.position.z);
 
-            mesh.geometry.setIndex(new GeometryManipulator(geo).removeCollapsedTriangles());
-            geo.computeVertexNormals();
+            const randomWeight = 0.1;
+            const randomRotation = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+            const outwardWeight = 0.2;
+            const parentAngularVel = asteroid.userData.physicsBody.getAngularVelocity();
+            mesh.userData.rotationalVelocity = new THREE.Vector3(parentAngularVel.x(), parentAngularVel.y(), parentAngularVel.z())
+                .multiplyScalar(parentWeight)
+                .addScaledVector(randomRotation, randomWeight);
+            mesh.userData.rotationalVelocity.z -= outwardWeight * sign;
+
+            // Move away from other other asteroid part ever so slightly to avoid overlap
+            mesh.position.addScaledVector(repellingVector, 0.002);
+
+            mesh.userData.recentHit = asteroid.userData.recentHit;
+
+            sign *= -1;
 
             this.scene.add(mesh);
             this.asteroids.push(mesh);
+            this.addRigidBodyPhysics(mesh, mesh.userData.volume);
         });
+        const a = this.asteroids[this.asteroids.length - 2];
+        const b = this.asteroids[this.asteroids.length - 1];
+        a.userData.asteroidCollisionHeat.set(b, a.userData.asteroidCollisionCooldownPeriod);
+        b.userData.asteroidCollisionHeat.set(a, b.userData.asteroidCollisionCooldownPeriod);
 
         this.scene.remove(asteroid);
         this.asteroids = this.asteroids.filter(a => a !== asteroid);
+        this.physics.removeRigidBody(asteroid.userData.physicsBody);
+    }
+
+    updateLasers(dt) {
+        this.lasers.forEach(laser => {
+            laser.userData.ttl -= dt;
+            if (laser.userData.ttl <= 0) {
+                this.scene.remove(laser);
+                this.scene.remove(laser.userData.light);
+                laser.isRemoved = true;
+            } else {
+                laser.position.addScaledVector(laser.userData.velocity, dt);
+                laser.userData.light.position.copy(laser.position);
+            }
+        });
+    }
+
+    removeLasers() {
+        this.lasers = this.lasers.filter(l => !l.isRemoved);
+    }
+
+    updateAsteroids(dt) {
+        const minVolume = 0.1;
+
+        this.physics.stepSimulation(dt, 10);
+
+        this.asteroids.forEach(a => {
+            if (a.userData.volume < minVolume) {
+                this.particles.handleDefaultBreakdown(a);
+                this.scene.remove(a);
+                this.physics.removeRigidBody(a.userData.physicsBody);
+                a.isRemoved = true;
+            } else {
+                this.updateRigidBodyPhysics(a);
+
+                for (const key of a.userData.asteroidCollisionHeat.keys()) {
+                    const heat = a.userData.asteroidCollisionHeat.get(key) - dt;
+                    if (heat <= 0) {
+                        a.userData.asteroidCollisionHeat.delete(key);
+                    } else {
+                        a.userData.asteroidCollisionHeat.set(key, heat);
+                    }
+                }
+            }
+        });
+        this.asteroids = this.asteroids.filter(a => !a.isRemoved);
+    }
+
+    updateRigidBodyPhysics(mesh) {
+        const ms = mesh.userData.physicsBody.getMotionState();
+        if (!ms) { return; }
+
+        const transformAux1 = new Ammo.btTransform();
+        ms.getWorldTransform(transformAux1);
+        const p = transformAux1.getOrigin();
+        const q = transformAux1.getRotation();
+
+        // Stay at z = 0
+        const vel = mesh.userData.physicsBody.getLinearVelocity();
+        if ((vel.z() < 0 && p.z() <= 0) || (vel.z() > 0 && p.z() >= 0)) {
+            p.setZ(0);
+            vel.setZ(0);
+            transformAux1.setOrigin(p);
+            mesh.userData.physicsBody.setMotionState(new Ammo.btDefaultMotionState(transformAux1));
+            mesh.userData.physicsBody.setLinearVelocity(vel);
+        }
+
+        mesh.position.set(p.x(), p.y(), p.z());
+        mesh.quaternion.set(q.x(), q.y(), q.z(), q.w());
+    }
+
+    handleLaserHit(laser, hit) {
+        hit.asteroid.userData.health -= laser.userData.damage;
+        hit.intersection.impact = laser.userData.velocity.clone();
+        hit.asteroid.userData.recentHit = hit.intersection;
+        nibbleAsteroid(hit.asteroid, hit.intersection);
+
+        this.particles.handleDefaultImpact(hit.intersection, hit.asteroid);
+        this.scene.remove(laser);
+        this.scene.remove(laser.userData.light);
+        laser.isRemoved = true;
+
+        if (hit.asteroid.userData.health <= 0) {
+            this.particles.handleDefaultSplit(hit.intersection, hit.asteroid);
+            this.splitAsteroid(hit.asteroid, laser);
+        }
     }
 }
 
 
 const defaultAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
 
-export function createAsteroid(radius = 0.9) {
+export function createAsteroidGeometry(radius = 0.9) {
     let geo = new THREE.IcosahedronGeometry(radius, 2);
     geo.deleteAttribute('normal');
     geo.deleteAttribute('uv');
@@ -148,15 +329,27 @@ export function createAsteroid(radius = 0.9) {
         pos.setXYZ(i, v.x, v.y, v.z);
     }
     geo.computeVertexNormals();
+    return geo;
+}
 
-    const mesh = new THREE.Mesh(geo, defaultAsteroidMat);
-    mesh.userData.velocity = new THREE.Vector2(0, 0);
-    mesh.userData.rotationalVelocity = new THREE.Vector2(0.15, 0.05);
-    mesh.userData.diameter = getDiameter(geo);
+export function createAsteroid(geometry, rotationSpeed = 0.333, randomHealth = 40) {
+    const mesh = new THREE.Mesh(geometry, defaultAsteroidMat);
+    mesh.userData.velocity = new THREE.Vector3(0, 0, 0);
+    mesh.userData.rotationalVelocity = new THREE.Vector3(
+        rotationSpeed * (Math.random() - 0.5),
+        rotationSpeed * (Math.random() - 0.5),
+        rotationSpeed * (Math.random() - 0.5)
+    );
+    mesh.userData.zPush = 0.02;
+    mesh.userData.diameter = getDiameter(geometry);
+    mesh.userData.volume = computeMeshVolume(mesh);
+    mesh.userData.asteroidCollisionCooldownPeriod = 0.1;
+    mesh.userData.asteroidCollisionHeat = new Map();
+    mesh.userData.health = 30 * Math.sqrt(mesh.userData.volume) + randomHealth * Math.random();
     return mesh;
 }
 
-export function createPlayer() {
+function createPlayer() {
     const geo = new THREE.BufferGeometry();
     geo.setFromPoints([
         new THREE.Vector3(0.2, 0, 0),
@@ -169,6 +362,9 @@ export function createPlayer() {
     const player = new THREE.Mesh(geo, mat);
     player.userData.speed = 4.2;
     player.userData.rotationalSpeed = 4.2;
+    player.userData.laserCooldownPeriod = 0.333;
+    player.userData.laserHeat = 0.0;
+    player.userData.laserSpreadRad = 0.01 * Math.PI;
     return player;
 }
 
@@ -353,7 +549,7 @@ export function checkLaserHit(laser, asteroids) {
     const raycaster = new THREE.Raycaster();
     raycaster.firstHitOnly = true;
 
-    const dir = new THREE.Vector3(laser.userData.velocity.x, laser.userData.velocity.y, 0).normalize();
+    const dir = laser.userData.velocity.clone().normalize();
     const origin = new THREE.Vector3().copy(laser.position).addScaledVector(dir, -0.5 * laser.userData.length);
 
     raycaster.set(origin, dir);
@@ -369,20 +565,98 @@ export function checkLaserHit(laser, asteroids) {
     return null;
 }
 
+/**
+ * Currently not used due to ammo.js
+ */
+export function checkAsteroidCollision(meshA, meshB) {
+    // Broad phase: bounding spheres
+    const sphereA = new THREE.Sphere();
+    const sphereB = new THREE.Sphere();
+    meshA.geometry.computeBoundingSphere();
+    meshB.geometry.computeBoundingSphere();
+    sphereA.copy(meshA.geometry.boundingSphere).applyMatrix4(meshA.matrixWorld);
+    sphereB.copy(meshB.geometry.boundingSphere).applyMatrix4(meshB.matrixWorld);
+
+    if (!sphereA.intersectsSphere(sphereB)) return false;
+
+    // Narrow phase: BVH intersection test
+    if (!meshA.geometry.boundsTree) { meshA.geometry.computeBoundsTree(); }
+    if (!meshB.geometry.boundsTree) { meshB.geometry.computeBoundsTree(); }
+
+    const transform = new THREE.Matrix4().copy(meshA.matrixWorld).invert().multiply(meshB.matrixWorld);
+    const collided = meshA.geometry.boundsTree.intersectsGeometry(meshB.geometry, transform);
+
+    console.log(`collided: ${collided}`);
+
+    return collided;
+}
+
+/**
+ * Currently not used due to ammo.js
+ */
+export function handleAsteroidCollision(meshA, meshB) {
+    const point = getApproximateCollisionPoint(meshA, meshB);
+
+    const normal = meshA.position.clone().sub(meshB.position).normalize();
+
+    // Relative velocity at contact point
+    const relVel = meshA.userData.velocity.clone().sub(meshB.userData.velocity);
+
+    // Project relative velocity onto normal
+    const sepVel = relVel.dot(normal);
+    if (sepVel > 0) return; // Already moving apart
+
+    const restitution = 1.0; // Perfectly elastic
+    const impulseMag = -(1 + restitution) * sepVel / 2;
+
+    const impulse = normal.clone().multiplyScalar(impulseMag);
+
+    meshA.userData.velocity.add(impulse);
+    meshB.userData.velocity.sub(impulse);
+
+    // === Angular velocity update ===
+
+    // r = contact point relative to center of mass
+    const rA = point.clone().sub(meshA.position);
+    const rB = point.clone().sub(meshB.position);
+
+    // TODO revise
+
+    const torqueA = new THREE.Vector3().copy(rA).cross(impulse);
+    const torqueB = new THREE.Vector3().copy(rB).cross(impulse).negate();
+
+    // Scale torque arbitrarily for effect (not physically accurate)
+    const spinScale = 0.05;
+    meshA.userData.rotationalVelocity.add(torqueA.multiplyScalar(spinScale));
+    meshB.userData.rotationalVelocity.add(torqueB.multiplyScalar(spinScale));
+
+    meshA.userData.asteroidCollisionHeat.set(meshB, meshA.userData.asteroidCollisionCooldownPeriod);
+    meshB.userData.asteroidCollisionHeat.set(meshA, meshB.userData.asteroidCollisionCooldownPeriod);
+}
+
+function getApproximateCollisionPoint(meshA, meshB) {
+    const target1 = {};
+    const target2 = {};
+
+    const aInvRot = new THREE.Euler(-meshA.rotation.x, -meshA.rotation.y, -meshA.rotation.z, "ZYX");
+    const aInvMatWorld = new THREE.Matrix4().makeTranslation(meshA.position.clone().multiplyScalar(-1));
+    aInvMatWorld.multiply(new THREE.Matrix4().makeRotationFromEuler(aInvRot));
+    const transform = new THREE.Matrix4().copy(aInvMatWorld).multiply(meshB.matrixWorld);
+
+    // Get closest point from meshA to meshB
+    meshA.geometry.boundsTree.closestPointToGeometry(
+        meshB.geometry,
+        transform,
+        target1,
+        target2
+    );
+    const collisionPoint = meshA.localToWorld(target1.point.clone()).add(meshB.localToWorld(target2.point.clone())).multiplyScalar(0.5);
+    return collisionPoint;
+}
+
 function getDiameter(geometry) {
-    const pos = geometry.attributes.position;
-    let maxDistSq = 0;
-    for (let i = 0; i < pos.count; i++) {
-        const p1 = new THREE.Vector3().fromBufferAttribute(pos, i);
-        for (let j = 0; j < i; j++) {
-            const p2 = new THREE.Vector3().fromBufferAttribute(pos, j);
-            const distSq = p2.sub(p1).lengthSq();
-            if (distSq > maxDistSq) {
-                maxDistSq = distSq;
-            }
-        }
-    }
-    return Math.sqrt(maxDistSq);
+    geometry.computeBoundingSphere();
+    return 2 * geometry.boundingSphere.radius;
 }
 
 

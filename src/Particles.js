@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SurfaceSampler, pointToLineDistanceSquared } from './GeometryUtils.js';
 
 
 export class ParticleSystem {
@@ -6,30 +7,150 @@ export class ParticleSystem {
         this.scene = scene;
         this.particleChunks = [];
         this.lights = [];
+
+        const textureLoader = new THREE.TextureLoader()
+        textureLoader.load('/media/smoke.png', (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            this.smokeTexture = createColorAlphaTexture(texture, 76, 76, 76);
+        });
     }
 
     handleDefaultImpact(intersection, asteroid, divertAngle = 0.3 * Math.PI, minLifetime = 0.333, maxLifetime = 1.0, minFadeoutRatio = 0.333, maxFadeoutRatio = 1.0) {
+        // Sparks
         const reflection = reflect(intersection.normal, intersection.impact);
         const noisyReflection = randomWiggleVector3(reflection, divertAngle);
         const sparkVelocities = [];
         for (let i = 0; i < 10; i++) {
-            const lifetime = minLifetime + (maxLifetime - minLifetime) * Math.random();
+            const lifetime = minLifetime + (maxLifetime - minLifetime) * Math.abs(getBiRandom());
             const fadeoutRatio = minFadeoutRatio + (maxFadeoutRatio - minFadeoutRatio) * Math.random();
             const { positions, velocities } = this.generateSparks(intersection.point, noisyReflection, 40);
-            this.addParticleChunk(positions, velocities, lifetime, fadeoutRatio * lifetime, 0xffcc66);
+            this.addColorParticleChunk(positions, velocities, lifetime, fadeoutRatio * lifetime, 0, 0xffcc66);
 
-            const velocity = getMeanVector3(velocities);
+            const velocity = getMeanVector3FromArray(velocities);
             sparkVelocities.push(velocity.x, velocity.y, velocity.z);
         }
 
-        const meanVelocity = getMeanVector3(sparkVelocities);
+        // Spark light
+        const meanVelocity = getMeanVector3FromArray(sparkVelocities);
         this.addLight(intersection.point, meanVelocity, maxLifetime, maxLifetime - minLifetime);
 
+        // Debris
         const objPointVel = getRotatedPointVelocity(intersection.point, asteroid);
         const awayFromCenter = intersection.point.clone().sub(asteroid.position).normalize();
         const generalDirection = objPointVel.add(awayFromCenter.multiplyScalar(0.2));
         const { positions, velocities } = this.generateDebris(intersection.point, generalDirection, 100, 0.2);
-        this.addParticleChunk(positions, velocities, 3.0, 2.0, 0x555555, THREE.NormalBlending, undefined, true);
+        this.addColorParticleChunk(positions, velocities, 3.0, 2.0, 0, 0x555555, THREE.NormalBlending, 0.025);
+
+        // Smoke
+        const smoke = this.generateDebris(intersection.point, generalDirection, 10, 0.3);
+        const lifetime = 7.0 + (2 * Math.random() - 1);
+        this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 70.0, 0.25, this.smokeTexture, THREE.NormalBlending, 0.25, false);
+    }
+
+    handleDefaultSplit(intersection, asteroid) {
+        // Prepare spawn points
+        const minPointDistance = 0.1;
+        const minPlaneDistance = 0.051;
+
+        const projectedPoints = [];
+        const planeOrigin = intersection.point;
+        const planeNormal = new THREE.Vector3(intersection.impact.y, -intersection.impact.x, 0).normalize();  // rotate impact 90° ccw
+        const pos = asteroid.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            const p = asteroid.localToWorld(new THREE.Vector3().fromBufferAttribute(pos, i));
+            const v = p.clone().sub(planeOrigin);
+            const dist = v.dot(planeNormal);
+            if (dist > minPlaneDistance) { continue; }
+            const projectedPoint = p.clone().sub(planeNormal.clone().multiplyScalar(dist));
+            if (!isPointWithinDistanceOfPoints(projectedPoint, projectedPoints, minPointDistance)) {
+                projectedPoints.push(projectedPoint);
+            }
+        }
+
+        // Smoke
+        const numSmokeParticles = Math.ceil(25 * asteroid.userData.diameter);
+        const outwardSpeed = 0.1;
+        const randomSpeed = 0.14;
+
+        const positions = [];
+        const velocities = [];
+        const center = getMeanVector3(projectedPoints);
+        for (let i = 0; i < numSmokeParticles; i++) {
+            const point = projectedPoints[Math.floor(i / numSmokeParticles * projectedPoints.length)];
+            positions.push(point.x, point.y, point.z);
+            const vel = point.clone().sub(center).normalize().multiplyScalar(outwardSpeed);
+            vel.x += randomSpeed * getBiRandom();
+            vel.y += randomSpeed * getBiRandom();
+            vel.z += randomSpeed * getBiRandom();
+            velocities.push(vel.x, vel.y, vel.z);
+        }
+
+        const lifetime = 7.0 + (2 * Math.random() - 1);
+        this.addTextureParticleChunk(positions, velocities, lifetime, 70.0, 0.3, this.smokeTexture, THREE.NormalBlending, 0.25, false);
+
+        // Debris
+        const numDebrisParticles = Math.ceil(40 * asteroid.userData.diameter);
+        const debrisOutwardSpeed = 0.25;
+        const debrisRandomSpeed = 0.1;
+        const debrisPositions = [];
+        const debrisVelocities = [];
+        for (let i = 0; i < numDebrisParticles; i++) {
+            const point = projectedPoints[Math.floor(i / numDebrisParticles * projectedPoints.length)];
+            debrisPositions.push(point.x, point.y, point.z);
+            const vel = point.clone().sub(center).normalize().multiplyScalar(debrisOutwardSpeed);
+            vel.x += debrisRandomSpeed * getBiRandom();
+            vel.y += debrisRandomSpeed * getBiRandom();
+            vel.z += debrisRandomSpeed * getBiRandom();
+
+            const dist = pointToLineDistanceSquared(point, asteroid.userData.recentHit.point, asteroid.userData.recentHit.impact);
+            const laserWeight = 0.05 * Math.exp(-100 * dist);
+            vel.addScaledVector(asteroid.userData.recentHit.impact, laserWeight);
+
+            debrisVelocities.push(vel.x, vel.y, vel.z);
+        }
+
+        const debrisLifetime = 3.0 + (1 * Math.random() - 0.5);
+        this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 2.0, 0, 0x555555, THREE.NormalBlending, 0.025);
+    }
+
+    handleDefaultBreakdown(asteroid) {
+        const surfaceSampler = new SurfaceSampler(asteroid.geometry);
+
+        // Debris
+        const numChunks = Math.ceil(15 * asteroid.userData.diameter);
+        const chunkSize = Math.ceil(15 * asteroid.userData.diameter);
+        for (let i = 0; i < numChunks; i++) {
+            const debrisPositions = [];
+            const debrisVelocities = [];
+            for (let j = 0; j < chunkSize; j++) {
+                const point = asteroid.localToWorld(surfaceSampler.getRandomPoint());
+                debrisPositions.push(point.x, point.y, point.z);
+                const vel = getRotatedPointVelocity(point, asteroid);
+
+                // Close particles get dragged by laser
+                const dist = pointToLineDistanceSquared(point, asteroid.userData.recentHit.point, asteroid.userData.recentHit.impact);
+                const laserWeight = 0.03 * Math.exp(-100 * dist);
+                vel.addScaledVector(asteroid.userData.recentHit.impact, laserWeight);
+
+                debrisVelocities.push(vel.x, vel.y, vel.z);
+            }
+            const debrisLifetime = 4.0 + (1 * Math.random() - 0.5);
+            this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 3.0, 0, 0x555555, THREE.NormalBlending, 0.025);
+        }
+
+        // Smoke
+        const numSmokeParticles = Math.ceil(25 * asteroid.userData.diameter);
+        const smokePositions = [];
+        const smokeVelocities = [];
+        for (let j = 0; j < numSmokeParticles; j++) {
+            const point = asteroid.localToWorld(surfaceSampler.getRandomPoint());
+            smokePositions.push(point.x, point.y, point.z);
+            const vel = getRotatedPointVelocity(point, asteroid);
+            smokeVelocities.push(vel.x, vel.y, vel.z);
+        }
+
+        const smokeLifetime = 5.0 + (2 * Math.random() - 1);
+        this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 80.0, 0.4, this.smokeTexture, THREE.NormalBlending, 0.8, false);
     }
 
     generateSparks(position, direction, count, spreadAngle = 0.25 * Math.PI, minSpeedRatio = 0.0667, maxSpeedRatio = 0.333) {
@@ -67,11 +188,7 @@ export class ParticleSystem {
         return {positions, velocities};
     }
 
-    addParticleChunk(positions, velocities, lifetime, fadeoutTime, color, blending = THREE.AdditiveBlending, size = 0.025, blur = false) {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-        geometry.setAttribute("velocity", new THREE.Float32BufferAttribute(velocities, 3));
-
+    addColorParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, color, blending = THREE.AdditiveBlending, size = 0.025, blur = false) {
         const material = new THREE.PointsMaterial({
             color: color,
             size: size,
@@ -81,8 +198,30 @@ export class ParticleSystem {
             blending: blending
         });
 
+        this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, blur);
+    }
+
+    addTextureParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, texture, blending = THREE.AdditiveBlending, size = 0.02, blur = false) {
+        const material = new THREE.PointsMaterial({
+            color: 0xffffff,
+            map: texture,
+            size: size,
+            transparent: true,
+            opacity: 1,
+            depthWrite: false,
+            blending: blending
+        });
+
+        this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, blur);
+    }
+
+    addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, blur = false) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute("velocity", new THREE.Float32BufferAttribute(velocities, 3));
+
         const particles = new THREE.Points(geometry, material);
-        particles.userData = { lifetime, fadeoutTime, age: 0 };
+        particles.userData = { lifetime, fadeoutTime, growthRate, age: 0 };
         if (blur) {
             particles.layers.enable(1);  // blur layer
         }
@@ -121,6 +260,7 @@ export class ParticleSystem {
 
             particles.userData.age += dt;
             particles.material.opacity = getFadeoutOpacity(particles.userData);
+            particles.material.size += particles.userData.growthRate * dt;
 
             pos.needsUpdate = true;
 
@@ -150,7 +290,10 @@ export class ParticleSystem {
 }
 
 function getFadeoutOpacity(data) {
-    return Math.min(1, Math.max(0, (data.lifetime - data.fadeoutTime - data.age) / data.fadeoutTime));
+    if (data.age < data.lifetime - data.fadeoutTime) {
+        return 1.0;
+    }
+    return 1.0 - (data.age - (data.lifetime - data.fadeoutTime)) / data.fadeoutTime;
 }
 
 function toPolar(vector) {
@@ -186,6 +329,9 @@ function apply2dPolarTo3dPolar(polar, r, phi) {
     return polar;
 }
 
+/**
+ * Generates a random number [-1..1] with a probability peak at 0.
+ */
 function getBiRandom() {
     return 4 * (Math.random() - 0.5) * (Math.random() - 0.5);
 }
@@ -197,7 +343,7 @@ function reflect(normal, impact) {
     return negImpact.add(stretchedNormal);
 }
 
-function getMeanVector3(arr) {
+function getMeanVector3FromArray(arr) {
     let sumX = 0, sumY = 0, sumZ = 0;
     let count = arr.length / 3; // Number of points
 
@@ -210,6 +356,18 @@ function getMeanVector3(arr) {
     return new THREE.Vector3(sumX / count, sumY / count, sumZ / count);
 }
 
+function getMeanVector3(vectors) {
+    let sumX = 0, sumY = 0, sumZ = 0;
+
+    vectors.forEach((vector) => {
+        sumX += vector.x;
+        sumY += vector.y;
+        sumZ += vector.z;
+    });
+
+    return new THREE.Vector3(sumX / vectors.length, sumY / vectors.length, sumZ / vectors.length);
+}
+
 function getRotatedPointVelocity(point, obj, resolution = 0.01) {
     const transformedPoint = point.clone().sub(obj.position);
     transformedPoint.applyAxisAngle(new THREE.Vector3(1, 0, 0), resolution * obj.userData.rotationalVelocity.x);
@@ -219,4 +377,45 @@ function getRotatedPointVelocity(point, obj, resolution = 0.01) {
     transformedPoint.z += obj.position.z;
     const velocity = transformedPoint.clone().sub(point).multiplyScalar(1 / resolution);
     return velocity;
+}
+
+function isPointWithinDistanceOfPoints(point, points, distance) {
+    const distanceSq = distance * distance;
+    for (const p of points) {
+        if (point.clone().sub(p).lengthSq() <= distanceSq) { return true; }
+    }
+    return false;
+}
+
+/**
+ * Creates a canvas texture filled with r, g, b. Uses texture's red channel as alpha.
+ */
+function createColorAlphaTexture(texture, r, g, b) {
+    const image = texture.image;
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d');
+
+    // Draw the PNG image to extract alpha
+    ctx.drawImage(image, 0, 0);
+    const imageData = ctx.getImageData(0, 0, image.width, image.height);
+    const data = imageData.data;
+
+    // Set specified color, use red channel from specified texture as alpha channel
+    for (let i = 0; i < data.length; i += 4) {
+        const alpha = data[i];
+        data[i + 0] = r;
+        data[i + 1] = g;
+        data[i + 2] = b;
+        data[i + 3] = alpha;
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+
+    const newTexture = new THREE.CanvasTexture(canvas);
+    newTexture.needsUpdate = true;
+    newTexture.minFilter = THREE.LinearFilter;
+    newTexture.magFilter = THREE.LinearFilter;
+    return newTexture;
 }
