@@ -44,7 +44,7 @@ export class ParticleSystem {
         // Smoke
         const smoke = this.generateDebris(intersection.point, generalDirection, 10, 0.3);
         const lifetime = 7.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 70.0, 0.25, this.smokeTexture, THREE.NormalBlending, 0.25, false);
+        this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 70.0, 0.25, this.smokeTexture, THREE.NormalBlending, 0.25);
     }
 
     handleDefaultSplit(intersection, asteroid) {
@@ -86,7 +86,7 @@ export class ParticleSystem {
         }
 
         const lifetime = 7.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(positions, velocities, lifetime, 70.0, 0.3, this.smokeTexture, THREE.NormalBlending, 0.25, false);
+        this.addTextureParticleChunk(positions, velocities, lifetime, 70.0, 0.3, this.smokeTexture, THREE.NormalBlending, 0.25);
 
         // Debris
         const numDebrisParticles = Math.ceil(40 * asteroid.userData.diameter);
@@ -150,7 +150,7 @@ export class ParticleSystem {
         }
 
         const smokeLifetime = 5.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 80.0, 0.4, this.smokeTexture, THREE.NormalBlending, 0.8, false);
+        this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 80.0, 0.4, this.smokeTexture, THREE.NormalBlending, 0.8);
     }
 
     generateSparks(position, direction, count, spreadAngle = 0.25 * Math.PI, minSpeedRatio = 0.0667, maxSpeedRatio = 0.333) {
@@ -188,7 +188,7 @@ export class ParticleSystem {
         return {positions, velocities};
     }
 
-    addColorParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, color, blending = THREE.AdditiveBlending, size = 0.025, blur = false) {
+    addColorParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, color, blending = THREE.AdditiveBlending, size = 0.025, layer = 0) {
         const material = new THREE.PointsMaterial({
             color: color,
             size: size,
@@ -198,10 +198,10 @@ export class ParticleSystem {
             blending: blending
         });
 
-        this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, blur);
+        this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, layer);
     }
 
-    addTextureParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, texture, blending = THREE.AdditiveBlending, size = 0.02, blur = false) {
+    addTextureParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, texture, blending = THREE.AdditiveBlending, size = 0.02, layer = 0) {
         const material = new THREE.PointsMaterial({
             color: 0xffffff,
             map: texture,
@@ -212,18 +212,18 @@ export class ParticleSystem {
             blending: blending
         });
 
-        this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, blur);
+        this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, layer);
     }
 
-    addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, blur = false) {
+    addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, layer = 0) {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
         geometry.setAttribute("velocity", new THREE.Float32BufferAttribute(velocities, 3));
 
         const particles = new THREE.Points(geometry, material);
         particles.userData = { lifetime, fadeoutTime, growthRate, age: 0 };
-        if (blur) {
-            particles.layers.enable(1);  // blur layer
+        if (layer != 0) {
+            particles.layers.enable(layer);
         }
 
         this.scene.add(particles);

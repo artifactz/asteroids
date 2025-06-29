@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import Ammo from 'ammo.js';
 import { getMousePositionAtZ, rotateTowards, moveCamera } from './Targeting.js';
 import { World, checkLaserHit, checkAsteroidCollision, handleAsteroidCollision } from './GameObjects.js';
-import { BlurLayer } from './PostProcessing.js';
+// import { BlurLayer } from './PostProcessing.js';
 
 const clock = new THREE.Clock();
 
@@ -12,7 +12,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const world = new World();
-const blurLayer = new BlurLayer();
+// const blurLayer = new BlurLayer();
 
 const collisionConfig = new Ammo.btDefaultCollisionConfiguration();
 const physicsWorld = new Ammo.btDiscreteDynamicsWorld(
@@ -113,7 +113,7 @@ function animate() {
     renderer.clear();
     renderer.render(world.scene, world.camera);
 
-    blurLayer.render(renderer, world.scene, world.camera, dt);
+    // blurLayer.render(renderer, world.scene, world.camera, dt);
 }
 
 animate();
