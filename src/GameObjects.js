@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
 import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import Ammo from 'ammo.js';
@@ -343,18 +344,20 @@ export class World {
 }
 
 function createPlayer() {
-    const geo = new THREE.BufferGeometry();
-    geo.setFromPoints([
-        new THREE.Vector3(0.2, 0, 0),
-        new THREE.Vector3(-0.2, 0.1, 0),
-        new THREE.Vector3(-0.2, -0.1, 0),
-    ]);
-    geo.setIndex([0, 1, 2]);
-    geo.computeVertexNormals();
-    const mat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-    const player = new THREE.Mesh(geo, mat);
-    player.userData.speed = 4.2;
-    player.userData.rotationalSpeed = 4.2;
+    const player = new THREE.Group();
+    const loader = new GLTFLoader();
+    loader.load("/media/spacecraft.glb", (gltf) => {
+        gltf.scene.position.z = -0.1;
+        gltf.scene.rotation.x = 0.5 * Math.PI;
+        gltf.scene.rotation.y = 0.5 * Math.PI;
+        gltf.scene.scale.set(0.0667, 0.0667, 0.0667);
+        player.add(gltf.scene);
+    });
+    player.userData.maxSpeed = 6.0;
+    player.userData.speed = 0.0;
+    player.userData.maxAccel = 6.0;
+    player.userData.accel = 0.0;
+    player.userData.rotationalSpeed = 3.9;
     player.userData.laserCooldownPeriod = 0.333;
     player.userData.laserHeat = 0.0;
     player.userData.laserSpreadRad = 0.01 * Math.PI;

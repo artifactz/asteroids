@@ -55,19 +55,19 @@ function animate() {
     }
 
     if (keys['w']) {
-        world.player.position.set(
-            world.player.position.x + dt * Math.cos(world.player.rotation.z) * world.player.userData.speed,
-            world.player.position.y + dt * Math.sin(world.player.rotation.z) * world.player.userData.speed,
-            0
-        );
+        world.player.userData.accel = world.player.userData.maxAccel;
+    } else if (keys['s']) {
+        world.player.userData.accel = -world.player.userData.maxAccel;
+    } else {
+        world.player.userData.accel = 0;
     }
-    if (keys['s']) {
-        world.player.position.set(
-            world.player.position.x - dt * Math.cos(world.player.rotation.z) * world.player.userData.speed,
-            world.player.position.y - dt * Math.sin(world.player.rotation.z) * world.player.userData.speed,
-            0
-        );
-    }
+
+    world.player.userData.speed += world.player.userData.accel * dt;
+    world.player.position.set(
+        world.player.position.x + dt * Math.cos(world.player.rotation.z) * world.player.userData.speed,
+        world.player.position.y + dt * Math.sin(world.player.rotation.z) * world.player.userData.speed,
+        0
+    );
 
     // Shoot
     if (mouse[0] && world.player.userData.laserHeat <= 0) {
