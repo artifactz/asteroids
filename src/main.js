@@ -99,7 +99,7 @@ function animate() {
         if (!laser.isRemoved) {
             const hit = checkLaserHit(laser, world.asteroids);
             if (hit) {
-                world.handleLaserHit(laser, hit);
+                world.handleLaserHit(laser, hit, dt);
             }
         }
     });

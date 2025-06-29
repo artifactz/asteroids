@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { SUBTRACTION, INTERSECTION, Brush, Evaluator, computeMeshVolume } from 'three-bvh-csg';
+import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
 import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import Ammo from 'ammo.js';
+import { createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
 import { ParticleSystem } from './Particles.js';
 import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
 
@@ -30,6 +30,79 @@ export class World {
 
         this.lasers = [];
         this.particles = new ParticleSystem(this.scene);
+
+        this.splitWorker = new Worker("/src/workers/AsteroidSplitWorker.js", { type: 'module' });
+        this.splitWorker.onmessage = (message) => {
+            let sign = 1;
+            const parentAsteroid = this.asteroids.find((a) => a.uuid == message.data.parentUuid);
+            message.data.splits.forEach((result) => {
+                result.geometry = new THREE.BufferGeometry();
+                result.geometry.setAttribute("position", new THREE.Float32BufferAttribute(result.vertexArray, 3));
+                result.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(result.normalArray, 3));
+                result.geometry.setIndex(new THREE.Uint16BufferAttribute(result.indexArray, 1));
+                const mesh = createAsteroid(result.geometry);
+
+                const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(
+                    parentAsteroid.userData.rotationalVelocity.x * parentAsteroid.userData.splitAge,
+                    parentAsteroid.userData.rotationalVelocity.y * parentAsteroid.userData.splitAge,
+                    parentAsteroid.userData.rotationalVelocity.z * parentAsteroid.userData.splitAge,
+                ));
+                const transform = rotation.clone().multiply(new THREE.Matrix4().makeTranslation(result.offset.x, result.offset.y, result.offset.z));
+                transform.decompose(mesh.position, mesh.quaternion, mesh.scale);
+
+                // mesh.position.addScaledVector(parentAsteroid.userData.velocity, parentAsteroid.userData.splitAge);
+                // mesh.position.add(new THREE.Vector3(message.data.parentPosition.x, message.data.parentPosition.y, message.data.parentPosition.z));
+                mesh.position.add(parentAsteroid.position);
+
+                const parentWeight = 0.95;
+                const repellingWeight = 0.1;
+                const laserWeight = 0.04;
+                const repellingVector = new THREE.Vector3(
+                    Math.cos(message.data.laserRotation - sign * 0.5 * Math.PI),
+                    Math.sin(message.data.laserRotation - sign * 0.5 * Math.PI),
+                    0
+                );
+                mesh.userData.velocity = parentAsteroid.userData.velocity.clone()
+                    .multiplyScalar(parentWeight)
+                    .addScaledVector(repellingVector, repellingWeight)
+                    .addScaledVector(message.data.laserDirection, laserWeight);
+                mesh.userData.velocity.z = 0.2 * -Math.sign(mesh.position.z);  // toward z=0
+
+                const randomWeight = 0.1;
+                const randomRotation = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
+                const outwardWeight = 0.3;
+                const outwardRotatation = new THREE.Vector3(-rotation.elements[2], -rotation.elements[6], -rotation.elements[10]);
+                // mesh.userData.rotationalVelocity = parentAsteroid.userData.rotationalVelocity.clone()
+                mesh.userData.rotationalVelocity = new THREE.Vector3(message.data.parentRotationalVelocityWorld.x, message.data.parentRotationalVelocityWorld.y, message.data.parentRotationalVelocityWorld.z)
+                    .multiplyScalar(parentWeight)
+                    .addScaledVector(randomRotation, randomWeight)
+                    .addScaledVector(outwardRotatation, outwardWeight * sign);
+                // mesh.userData.rotationalVelocity.z -= outwardWeight * sign;
+
+                // Move away from other asteroid part ever so slightly to avoid overlap
+                mesh.position.addScaledVector(repellingVector, 0.002);
+
+                mesh.userData.recentHit = parentAsteroid.userData.recentHit;
+
+                sign *= -1;
+
+                this.scene.add(mesh);
+                this.asteroids.push(mesh);
+                console.time('addRigidBodyPhysics');
+                this.addRigidBodyPhysics(mesh, mesh.userData.volume);
+                console.timeEnd('addRigidBodyPhysics');
+
+            });
+
+            const a = this.asteroids[this.asteroids.length - 2];
+            const b = this.asteroids[this.asteroids.length - 1];
+            a.userData.asteroidCollisionHeat.set(b, a.userData.asteroidCollisionCooldownPeriod);
+            b.userData.asteroidCollisionHeat.set(a, b.userData.asteroidCollisionCooldownPeriod);
+
+            this.scene.remove(parentAsteroid);
+            this.asteroids = this.asteroids.filter(a => a !== parentAsteroid);
+
+        };
     }
 
     createCamera() {
@@ -67,28 +140,13 @@ export class World {
     }
 
     addRigidBodyPhysics(mesh, mass = 1) {
-        const vertices = mesh.geometry.clone().toNonIndexed().attributes.position.array;
-
-        // const ammoMesh = new Ammo.btTriangleMesh();
-
-        // for (let i = 0; i < vertices.length; i += 9) {
-        //     const v0 = new Ammo.btVector3(vertices[i], vertices[i + 1], vertices[i + 2]);
-        //     const v1 = new Ammo.btVector3(vertices[i + 3], vertices[i + 4], vertices[i + 5]);
-        //     const v2 = new Ammo.btVector3(vertices[i + 6], vertices[i + 7], vertices[i + 8]);
-        //     ammoMesh.addTriangle(v0, v1, v2, true);
-        // }
-
-        // const shape = new Ammo.btBvhTriangleMeshShape(ammoMesh, true, true);
-
+        const vertices = mesh.geometry.attributes.position.array;
         const shape = new Ammo.btConvexHullShape();
         shape.setMargin(0);
         for (let i = 0; i < vertices.length; i += 3) {
             const vertex = new Ammo.btVector3(vertices[i], vertices[i + 1], vertices[i + 2]);
             shape.addPoint(vertex, true);
         }
-
-        // shape.optimizeConvexHull();
-        // shape.recalcLocalAabb();
 
         const transform = new Ammo.btTransform();
         transform.setIdentity();
@@ -110,11 +168,20 @@ export class World {
 
         body.setRestitution(1.8 + 0.1 * Math.random());
         body.setFriction(0.0);
-        body.setRollingFriction(0.0);    // resist rotation when rolling
+        body.setRollingFriction(0.0);
         body.setDamping(0.0, 0.0);
 
         this.physics.addRigidBody(body);
         mesh.userData.physicsBody = body;
+    }
+
+    removeRigidBodyPhysics(mesh) {
+        const vel = mesh.userData.physicsBody.getLinearVelocity();
+        mesh.userData.velocity.set(vel.x(), vel.y(), vel.z());
+        const rotVel = mesh.userData.physicsBody.getAngularVelocity();
+        mesh.userData.rotationalVelocity.set(rotVel.x(), rotVel.y(), rotVel.z());
+        this.physics.removeRigidBody(mesh.userData.physicsBody);
+        mesh.userData.physicsBody = null;
     }
 
     createLaser(position, angle, speed = 14.4, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
@@ -141,90 +208,36 @@ export class World {
         return laser;
     }
 
-    splitAsteroid(asteroid, laser) {
-        const laserDirection = laser.userData.velocity.clone().normalize();
-        const boxSize = 2.0 * asteroid.userData.diameter;
+    /**
+     * Disables collisions and enqueues a splitWorker task.
+     */
+    splitAsteroid(asteroid, laser, dt) {
+        // Switch to simple physics
+        this.removeRigidBodyPhysics(asteroid);
 
-        const cutterGeo = buildNoisyCutter(boxSize);
-        cutterGeo.translate(0.5 * boxSize, 0.0, 0.0);
-        const laserRotation = Math.atan2(laserDirection.y, laserDirection.x);
-        cutterGeo.rotateZ(laserRotation + 0.5 * Math.PI);
+        asteroid.userData.splitAge = dt;
 
-        const brush1 = new Brush(asteroid.geometry);
-        brush1.position.copy(asteroid.position);
-        brush1.rotation.copy(asteroid.rotation);
-        brush1.updateMatrixWorld();
+        const rotVelWorld = new THREE.Vector3(asteroid.userData.rotationalVelocity.x, asteroid.userData.rotationalVelocity.y, asteroid.userData.rotationalVelocity.z);
+        // const rotMat = new THREE.Matrix4().makeRotationFromEuler(asteroid.rotation);
+        // asteroid.localToWorld(rotVelWorld);
+        rotVelWorld.applyEuler(asteroid.rotation);
 
-        const brush2 = new Brush(cutterGeo);
-        brush2.position.copy(laser.position);
-        brush2.position.addScaledVector(laserDirection, 0.5 * asteroid.userData.diameter);
-        brush2.updateMatrixWorld();
-
-        const evaluator = new Evaluator();
-        evaluator.attributes = ["position", "normal"];
-        const A = evaluator.evaluate( brush1, brush2, SUBTRACTION );
-        const B = evaluator.evaluate( brush1, brush2, INTERSECTION );
-
-        let sign = 1;
-        [A, B].forEach(brush => {
-            // printDuplicateTriangles(brush.geometry);
-
-            const cleanGeo = new GeometryManipulator(BufferGeometryUtils.mergeVertices(brush.geometry, 0.0001)).splitTrianglesOnTouchingVertices();
-            // TODO replace with simplifyGeometry
-            const geo = BufferGeometryUtils.mergeVertices(cleanGeo, 0.01);
-
-            // printCollapsedTriangles(geo);
-
-            geo.translate(-asteroid.position.x, -asteroid.position.y, -asteroid.position.z);
-            geo.computeBoundingBox();
-            const t = geo.boundingBox.getCenter(new THREE.Vector3());
-            geo.translate(-t.x, -t.y, -t.z);
-
-            geo.setIndex(new GeometryManipulator(geo).removeCollapsedTriangles());
-            geo.computeVertexNormals();
-
-            const mesh = createAsteroid(geo);
-            mesh.position.copy(asteroid.position).add(t);
-
-            const parentWeight = 0.95;
-            const repellingWeight = 0.1;
-            const laserWeight = 0.04;
-            const parentLinearVel = asteroid.userData.physicsBody.getLinearVelocity();
-            const repellingVector = new THREE.Vector3(Math.cos(laserRotation - sign * 0.5 * Math.PI), Math.sin(laserRotation - sign * 0.5 * Math.PI), 0);
-            mesh.userData.velocity = new THREE.Vector3(parentLinearVel.x(), parentLinearVel.y(), parentLinearVel.z())
-                .multiplyScalar(parentWeight)
-                .addScaledVector(repellingVector, repellingWeight)
-                .addScaledVector(laserDirection, laserWeight);
-            mesh.userData.velocity.z = 0.2 * -Math.sign(mesh.position.z);
-
-            const randomWeight = 0.1;
-            const randomRotation = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
-            const outwardWeight = 0.2;
-            const parentAngularVel = asteroid.userData.physicsBody.getAngularVelocity();
-            mesh.userData.rotationalVelocity = new THREE.Vector3(parentAngularVel.x(), parentAngularVel.y(), parentAngularVel.z())
-                .multiplyScalar(parentWeight)
-                .addScaledVector(randomRotation, randomWeight);
-            mesh.userData.rotationalVelocity.z -= outwardWeight * sign;
-
-            // Move away from other other asteroid part ever so slightly to avoid overlap
-            mesh.position.addScaledVector(repellingVector, 0.002);
-
-            mesh.userData.recentHit = asteroid.userData.recentHit;
-
-            sign *= -1;
-
-            this.scene.add(mesh);
-            this.asteroids.push(mesh);
-            this.addRigidBodyPhysics(mesh, mesh.userData.volume);
+        this.splitWorker.postMessage({
+            asteroid: {
+                uuid: asteroid.uuid,
+                position: {x: asteroid.position.x, y: asteroid.position.y, z: asteroid.position.z},
+                rotation: {x: asteroid.rotation.x, y: asteroid.rotation.y, z: asteroid.rotation.z},
+                rotationalVelocityWorld: {x: rotVelWorld.x, y: rotVelWorld.y, z: rotVelWorld.z},
+                diameter: asteroid.userData.diameter,
+                vertexArray: asteroid.geometry.attributes.position.array,
+                normalArray: asteroid.geometry.attributes.normal.array,
+                indexArray: asteroid.geometry.index.array,
+            },
+            laser: {
+                position: {x: laser.position.x, y: laser.position.y, z: laser.position.z},
+                velocity: {x: laser.userData.velocity.x, y: laser.userData.velocity.y, z: laser.userData.velocity.z},
+            }
         });
-        const a = this.asteroids[this.asteroids.length - 2];
-        const b = this.asteroids[this.asteroids.length - 1];
-        a.userData.asteroidCollisionHeat.set(b, a.userData.asteroidCollisionCooldownPeriod);
-        b.userData.asteroidCollisionHeat.set(a, b.userData.asteroidCollisionCooldownPeriod);
-
-        this.scene.remove(asteroid);
-        this.asteroids = this.asteroids.filter(a => a !== asteroid);
-        this.physics.removeRigidBody(asteroid.userData.physicsBody);
     }
 
     updateLasers(dt) {
@@ -257,7 +270,14 @@ export class World {
                 this.physics.removeRigidBody(a.userData.physicsBody);
                 a.isRemoved = true;
             } else {
-                this.updateRigidBodyPhysics(a);
+                if (!this.updateRigidBodyPhysics(a)) {
+                    a.position.addScaledVector(a.userData.velocity, dt);
+                    if ((a.position.z > 0 && a.userData.velocity.z > 0) || a.position.z < 0 && a.userData.velocity.z < 0) {
+                        a.position.z = 0;
+                        a.userData.velocity.z = 0;
+                    }
+                    applyRotation(a, dt);
+                }
 
                 for (const key of a.userData.asteroidCollisionHeat.keys()) {
                     const heat = a.userData.asteroidCollisionHeat.get(key) - dt;
@@ -267,14 +287,17 @@ export class World {
                         a.userData.asteroidCollisionHeat.set(key, heat);
                     }
                 }
+
+                if (a.userData.splitAge !== null) { a.userData.splitAge += dt };
             }
         });
         this.asteroids = this.asteroids.filter(a => !a.isRemoved);
     }
 
     updateRigidBodyPhysics(mesh) {
+        if (!mesh.userData.physicsBody) { return false; }
         const ms = mesh.userData.physicsBody.getMotionState();
-        if (!ms) { return; }
+        if (!ms) { return false; }
 
         const transformAux1 = new Ammo.btTransform();
         ms.getWorldTransform(transformAux1);
@@ -293,9 +316,11 @@ export class World {
 
         mesh.position.set(p.x(), p.y(), p.z());
         mesh.quaternion.set(q.x(), q.y(), q.z(), q.w());
+
+        return true;
     }
 
-    handleLaserHit(laser, hit) {
+    handleLaserHit(laser, hit, dt) {
         hit.asteroid.userData.health -= laser.userData.damage;
         hit.intersection.impact = laser.userData.velocity.clone();
         hit.asteroid.userData.recentHit = hit.intersection;
@@ -306,47 +331,15 @@ export class World {
         this.scene.remove(laser.userData.light);
         laser.isRemoved = true;
 
-        if (hit.asteroid.userData.health <= 0) {
+        if (hit.asteroid.userData.health <= 0 && hit.asteroid.userData.splitAge === null) {
+            console.time('splitParticles');
             this.particles.handleDefaultSplit(hit.intersection, hit.asteroid);
-            this.splitAsteroid(hit.asteroid, laser);
+            console.timeEnd('splitParticles');
+            console.time('splitAsteroid');
+            this.splitAsteroid(hit.asteroid, laser, dt);
+            console.timeEnd('splitAsteroid');
         }
     }
-}
-
-
-const defaultAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
-
-export function createAsteroidGeometry(radius = 0.9) {
-    let geo = new THREE.IcosahedronGeometry(radius, 2);
-    geo.deleteAttribute('normal');
-    geo.deleteAttribute('uv');
-    // TODO replace with simplifyGeometry / reduce tolerance
-    geo = BufferGeometryUtils.mergeVertices(geo, 0.09);
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-        const v = new THREE.Vector3().fromBufferAttribute(pos, i);
-        v.addScaledVector(v.clone().normalize(), (Math.random() - 0.5) * 0.4);
-        pos.setXYZ(i, v.x, v.y, v.z);
-    }
-    geo.computeVertexNormals();
-    return geo;
-}
-
-export function createAsteroid(geometry, rotationSpeed = 0.333, randomHealth = 40) {
-    const mesh = new THREE.Mesh(geometry, defaultAsteroidMat);
-    mesh.userData.velocity = new THREE.Vector3(0, 0, 0);
-    mesh.userData.rotationalVelocity = new THREE.Vector3(
-        rotationSpeed * (Math.random() - 0.5),
-        rotationSpeed * (Math.random() - 0.5),
-        rotationSpeed * (Math.random() - 0.5)
-    );
-    mesh.userData.zPush = 0.02;
-    mesh.userData.diameter = getDiameter(geometry);
-    mesh.userData.volume = computeMeshVolume(mesh);
-    mesh.userData.asteroidCollisionCooldownPeriod = 0.1;
-    mesh.userData.asteroidCollisionHeat = new Map();
-    mesh.userData.health = 30 * Math.sqrt(mesh.userData.volume) + randomHealth * Math.random();
-    return mesh;
 }
 
 function createPlayer() {
@@ -500,51 +493,6 @@ function generateStarTexture({
     return new THREE.CanvasTexture(canvas);
 }
 
-function buildNoisyCutter(boxSize, resolution = 15, amplitude = 0.1) {
-    const front = new THREE.PlaneGeometry(boxSize, boxSize);
-    front.translate(0, 0, 0.5 * boxSize);
-    const right = new THREE.BufferGeometry().copy(front);
-    right.rotateY(0.5 * Math.PI);
-    const back = new THREE.BufferGeometry().copy(front);
-    back.rotateY(Math.PI);
-    const top = new THREE.BufferGeometry().copy(front);
-    top.rotateX(-0.5 * Math.PI);
-    const bottom = new THREE.BufferGeometry().copy(front);
-    bottom.rotateX(0.5 * Math.PI);
-
-    const crack = createCrackPlane(boxSize, boxSize, resolution, amplitude);
-
-    // Position the plane where the left face would be
-    crack.rotateY(-Math.PI / 2);
-    crack.translate(-0.5 * boxSize, 0, 0);
-
-    // Merge box and noisy crack
-    const merged = BufferGeometryUtils.mergeGeometries([front, right, back, top, bottom, crack]);
-    return merged
-}
-
-function createCrackPlane(width = 1.0, height = 1.0, segments = 20, amplitude = 0.1) {
-    const plane = new THREE.PlaneGeometry(width, height, segments, segments);
-    const pos = plane.attributes.position;
-
-    for (let i = 0; i < pos.count; i++) {
-        const x = pos.getX(i);
-        const y = pos.getY(i);
-
-        // Keep edges straight
-        if (Math.abs(x + 0.5 * width) < 1e-4 || Math.abs(x - 0.5 * width) < 1e-4 || Math.abs(y + 0.5 * height) < 1e-4 || Math.abs(y - 0.5 * height) < 1e-4) {
-            continue;
-        }
-
-        const noise = amplitude * (Math.random() - 0.5);
-
-        pos.setZ(i, noise); // displace along Z-axis
-    }
-
-    plane.computeVertexNormals();
-    return plane;
-}
-
 export function checkLaserHit(laser, asteroids) {
     const raycaster = new THREE.Raycaster();
     raycaster.firstHitOnly = true;
@@ -654,11 +602,6 @@ function getApproximateCollisionPoint(meshA, meshB) {
     return collisionPoint;
 }
 
-function getDiameter(geometry) {
-    geometry.computeBoundingSphere();
-    return 2 * geometry.boundingSphere.radius;
-}
-
 
 const defaultNibbleRadius = 0.15;
 const defaultNibbleDepth = 0.05;
@@ -699,4 +642,11 @@ export function nibbleAsteroid(asteroid, intersection, rx = null, ry = null, rz 
 
     geo.computeVertexNormals();
     asteroid.geometry = geo;
+}
+
+function applyRotation(mesh, dt) {
+    const angle = mesh.userData.rotationalVelocity.length() * dt;
+    const axis = mesh.userData.rotationalVelocity.clone().normalize();
+    const deltaQuat = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+    mesh.quaternion.multiplyQuaternions(deltaQuat, mesh.quaternion);
 }
