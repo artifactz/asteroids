@@ -1,18 +1,31 @@
 import * as THREE from 'three';
 import Ammo from 'ammo.js';
 import { getMousePositionAtZ, rotateTowards, moveCamera } from './Targeting.js';
-import { World, checkLaserHit, checkAsteroidCollision, handleAsteroidCollision } from './GameObjects.js';
-// import { BlurLayer } from './PostProcessing.js';
+import { World, checkLaserHit } from './GameObjects.js';
+import { SmokeLighting, Blend } from './PostProcessing.js';
 
 const clock = new THREE.Clock();
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer(); // { antialias: true }
 renderer.autoClear = false;
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-const world = new World();
-// const blurLayer = new BlurLayer();
+// Off-screen render target used to access main scene depth buffer
+const renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+    samples: 8,
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    depthBuffer: true,
+});
+renderTarget.depthTexture = new THREE.DepthTexture();
+renderTarget.depthTexture.format = THREE.DepthFormat;
+renderTarget.depthTexture.type = THREE.UnsignedShortType;
+
+const world = new World(renderTarget.depthTexture);
+
+const blend = new Blend(THREE.NormalBlending);
+const smokeLighting = new SmokeLighting();
 
 const collisionConfig = new Ammo.btDefaultCollisionConfiguration();
 const physicsWorld = new Ammo.btDiscreteDynamicsWorld(
@@ -83,17 +96,6 @@ function animate() {
     // Move asteroids
     world.updateAsteroids(dt);
 
-    // // Collide asteroids with other asteroids
-    // for (let i = 0; i < world.asteroids.length; i++) {
-    //     for (let j = i + 1; j < world.asteroids.length; j++) {
-    //         const a = world.asteroids[i], b = world.asteroids[j];
-    //         if (a.userData.asteroidCollisionHeat.get(b) > 0 || b.userData.asteroidCollisionHeat.get(a) > 0) { console.log("skipping"); continue; }
-    //         if (checkAsteroidCollision(a, b)) {
-    //             handleAsteroidCollision(a, b);
-    //         }
-    //     }
-    // }
-
     // Collide lasers with asteroids
     world.lasers.forEach(laser => {
         if (!laser.isRemoved) {
@@ -108,12 +110,15 @@ function animate() {
 
     world.particles.update(dt);
 
-    renderer.setRenderTarget(null);
+    renderer.setRenderTarget(renderTarget);
     renderer.setClearColor(world.clearColor);
     renderer.clear();
     renderer.render(world.scene, world.camera);
 
-    // blurLayer.render(renderer, world.scene, world.camera, dt);
+    renderer.setRenderTarget(null);
+    blend.render(renderer, renderTarget.texture);
+
+    smokeLighting.render(renderer, world.scene, world.camera, dt);
 }
 
 animate();

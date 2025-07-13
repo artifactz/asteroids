@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeMeshVolume } from 'three-bvh-csg';
 
-const defaultAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true });
+const defaultAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true, depthWrite: true });
 
 export function createAsteroidGeometry(radius = 0.9) {
     let geo = new THREE.IcosahedronGeometry(radius, 2);

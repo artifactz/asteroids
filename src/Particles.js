@@ -2,9 +2,77 @@ import * as THREE from 'three';
 import { SurfaceSampler, pointToLineDistanceSquared } from './GeometryUtils.js';
 
 
+/**
+ * Particle system for rendering effects like smoke, sparks, and debris.
+ */
 export class ParticleSystem {
-    constructor(scene) {
+    /**
+     * @param {THREE.Scene} scene 
+     * @param {THREE.Camera} camera 
+     * @param {THREE.DepthTexture} depthTexture  Particles are rendered separately, so we do z culling manually.
+     */
+    constructor(scene, camera, depthTexture) {
         this.scene = scene;
+        this.cameraNear = camera.near;
+        this.cameraFar = camera.far;
+        this.depthTexture = depthTexture;
+
+        this.pointMaterialVertexShader = `
+            uniform float size;
+            void main() {
+                vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+                gl_PointSize = size * ( 500.0 / -mvPosition.z );
+                gl_Position = projectionMatrix * mvPosition;
+            }
+        `;
+        this.texturedPointMaterialFragmentShader = `
+            uniform sampler2D tMap;
+            uniform sampler2D tDepth;
+            uniform float opacity;
+            uniform float cameraNear;
+            uniform float cameraFar;
+            uniform vec2 resolution;
+
+            void main() {
+                vec2 uv = gl_FragCoord.xy / resolution;
+                float depth = texture2D(tDepth, uv).r;
+                if (gl_FragCoord.z > depth) {
+                    discard;
+                }
+
+                vec4 particleColor = texture2D(tMap, gl_PointCoord);
+                particleColor.a *= opacity;
+                gl_FragColor = vec4(
+                    particleColor.rgb + ((1.0 - particleColor.a) * gl_FragColor.rgb),
+                    particleColor.a + (1.0 - particleColor.a) * gl_FragColor.a
+                );
+            }
+        `;
+        // TODO add additive blending capability (e.g. for sparks)
+        this.coloredPointMaterialFragmentShader = `
+            uniform vec3 color;
+            uniform sampler2D tDepth;
+            uniform float opacity;
+            uniform float cameraNear;
+            uniform float cameraFar;
+            uniform vec2 resolution;
+
+            void main() {
+                vec2 uv = gl_FragCoord.xy / resolution;
+                float depth = texture2D(tDepth, uv).r;
+                if (gl_FragCoord.z > depth) {
+                    discard;
+                }
+
+                vec4 particleColor = vec4(color, 1.0);
+                particleColor.a *= opacity;
+                gl_FragColor = vec4(
+                    particleColor.rgb + ((1.0 - particleColor.a) * gl_FragColor.rgb),
+                    particleColor.a + (1.0 - particleColor.a) * gl_FragColor.a
+                );
+            }
+        `;
+
         this.particleChunks = [];
         this.lights = [];
 
@@ -24,7 +92,7 @@ export class ParticleSystem {
             const lifetime = minLifetime + (maxLifetime - minLifetime) * Math.abs(getBiRandom());
             const fadeoutRatio = minFadeoutRatio + (maxFadeoutRatio - minFadeoutRatio) * Math.random();
             const { positions, velocities } = this.generateSparks(intersection.point, noisyReflection, 40);
-            this.addColorParticleChunk(positions, velocities, lifetime, fadeoutRatio * lifetime, 0, 0xffcc66);
+            this.addColorParticleChunk(positions, velocities, lifetime, fadeoutRatio * lifetime, 0, 0xffcc66, THREE.AdditiveBlending);
 
             const velocity = getMeanVector3FromArray(velocities);
             sparkVelocities.push(velocity.x, velocity.y, velocity.z);
@@ -39,12 +107,12 @@ export class ParticleSystem {
         const awayFromCenter = intersection.point.clone().sub(asteroid.position).normalize();
         const generalDirection = objPointVel.add(awayFromCenter.multiplyScalar(0.2));
         const { positions, velocities } = this.generateDebris(intersection.point, generalDirection, 100, 0.2);
-        this.addColorParticleChunk(positions, velocities, 3.0, 2.0, 0, 0x555555, THREE.NormalBlending, 0.025);
+        this.addColorParticleChunk(positions, velocities, 3.0, 2.0, 0, 0x555555, THREE.NormalBlending, 0.025, 1);
 
         // Smoke
         const smoke = this.generateDebris(intersection.point, generalDirection, 10, 0.3);
         const lifetime = 7.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 70.0, 0.25, this.smokeTexture, THREE.NormalBlending, 0.25);
+        this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 79.0, 0.25, this.smokeTexture, THREE.NormalBlending, 0.25, 1);
     }
 
     handleDefaultSplit(intersection, asteroid) {
@@ -86,7 +154,7 @@ export class ParticleSystem {
         }
 
         const lifetime = 7.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(positions, velocities, lifetime, 70.0, 0.3, this.smokeTexture, THREE.NormalBlending, 0.25);
+        this.addTextureParticleChunk(positions, velocities, lifetime, 70.0, 0.3, this.smokeTexture, THREE.NormalBlending, 0.25, 1);
 
         // Debris
         const numDebrisParticles = Math.ceil(40 * asteroid.userData.diameter);
@@ -110,7 +178,7 @@ export class ParticleSystem {
         }
 
         const debrisLifetime = 3.0 + (1 * Math.random() - 0.5);
-        this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 2.0, 0, 0x555555, THREE.NormalBlending, 0.025);
+        this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 2.0, 0, 0x555555, THREE.NormalBlending, 0.025, 1);
     }
 
     handleDefaultBreakdown(asteroid) {
@@ -135,7 +203,7 @@ export class ParticleSystem {
                 debrisVelocities.push(vel.x, vel.y, vel.z);
             }
             const debrisLifetime = 4.0 + (1 * Math.random() - 0.5);
-            this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 3.0, 0, 0x555555, THREE.NormalBlending, 0.025);
+            this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 3.0, 0, 0x555555, THREE.NormalBlending, 0.025, 1);
         }
 
         // Smoke
@@ -150,7 +218,7 @@ export class ParticleSystem {
         }
 
         const smokeLifetime = 5.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 80.0, 0.4, this.smokeTexture, THREE.NormalBlending, 0.8);
+        this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 80.0, 0.4, this.smokeTexture, THREE.NormalBlending, 0.8, 1);
     }
 
     generateSparks(position, direction, count, spreadAngle = 0.25 * Math.PI, minSpeedRatio = 0.0667, maxSpeedRatio = 0.333) {
@@ -189,27 +257,42 @@ export class ParticleSystem {
     }
 
     addColorParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, color, blending = THREE.AdditiveBlending, size = 0.025, layer = 0) {
-        const material = new THREE.PointsMaterial({
-            color: color,
-            size: size,
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                color: { value: new THREE.Color(color) },
+                tDepth: { value: this.depthTexture },
+                cameraNear: { value: this.cameraNear },
+                cameraFar: { value: this.cameraFar },
+                resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                size: { value: size },
+                opacity: { value: 1 },
+            },
+            vertexShader: this.pointMaterialVertexShader,
+            fragmentShader: this.coloredPointMaterialFragmentShader,
+            blending: blending,
             transparent: true,
-            opacity: 1,
             depthWrite: false,
-            blending: blending
         });
 
         this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, layer);
     }
 
-    addTextureParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, texture, blending = THREE.AdditiveBlending, size = 0.02, layer = 0) {
-        const material = new THREE.PointsMaterial({
-            color: 0xffffff,
-            map: texture,
-            size: size,
+    addTextureParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, texture, blending = THREE.NormalBlending, size = 0.25, layer = 0) {
+        const material = new THREE.ShaderMaterial({
+            uniforms: {
+                tMap: { value: texture },
+                tDepth: { value: this.depthTexture },
+                cameraNear: { value: this.cameraNear },
+                cameraFar: { value: this.cameraFar },
+                resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                size: { value: size },
+                opacity: { value: 1 },
+            },
+            vertexShader: this.pointMaterialVertexShader,
+            fragmentShader: this.texturedPointMaterialFragmentShader,
+            blending: blending,
             transparent: true,
-            opacity: 1,
             depthWrite: false,
-            blending: blending
         });
 
         this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, material, layer);
@@ -223,6 +306,7 @@ export class ParticleSystem {
         const particles = new THREE.Points(geometry, material);
         particles.userData = { lifetime, fadeoutTime, growthRate, age: 0 };
         if (layer != 0) {
+            particles.layers.disable(0);
             particles.layers.enable(layer);
         }
 
@@ -259,8 +343,14 @@ export class ParticleSystem {
             }
 
             particles.userData.age += dt;
-            particles.material.opacity = getFadeoutOpacity(particles.userData);
-            particles.material.size += particles.userData.growthRate * dt;
+
+            if (particles.material instanceof THREE.PointsMaterial) {
+                particles.material.opacity = getFadeoutOpacity(particles.userData);
+                particles.material.size += particles.userData.growthRate * dt;
+            } else if (particles.material instanceof THREE.ShaderMaterial) {
+                particles.material.uniforms.opacity.value = getFadeoutOpacity(particles.userData);
+                particles.material.uniforms.size.value += particles.userData.growthRate * dt;
+            }
 
             pos.needsUpdate = true;
 

@@ -11,8 +11,14 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 
+/**
+ * World class that manages the game scene, camera, and physics.
+ */
 export class World {
-    constructor() {
+    /**
+     * @param {THREE.DepthTexture} depthTexture  Main scene depth buffer for the particle renderer.
+     */
+    constructor(depthTexture) {
         this.scene = new THREE.Scene();
         this.clearColor = new THREE.Color(0x000000);
 
@@ -30,31 +36,33 @@ export class World {
         this.scene.add(this.asteroids[1]);
 
         this.lasers = [];
-        this.particles = new ParticleSystem(this.scene);
+        this.particles = new ParticleSystem(this.scene, this.camera, depthTexture);
 
         this.splitWorker = new Worker("/src/workers/AsteroidSplitWorker.js", { type: 'module' });
+        /** Handles worker results. */
         this.splitWorker.onmessage = (message) => {
             let sign = 1;
             const parentAsteroid = this.asteroids.find((a) => a.uuid == message.data.parentUuid);
             message.data.splits.forEach((result) => {
+                // Mesh
                 result.geometry = new THREE.BufferGeometry();
                 result.geometry.setAttribute("position", new THREE.Float32BufferAttribute(result.vertexArray, 3));
                 result.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(result.normalArray, 3));
                 result.geometry.setIndex(new THREE.Uint16BufferAttribute(result.indexArray, 1));
                 const mesh = createAsteroid(result.geometry);
 
+                // Rotation since split begin
                 const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(
                     parentAsteroid.userData.rotationalVelocity.x * parentAsteroid.userData.splitAge,
                     parentAsteroid.userData.rotationalVelocity.y * parentAsteroid.userData.splitAge,
                     parentAsteroid.userData.rotationalVelocity.z * parentAsteroid.userData.splitAge,
                 ));
+                // Rotated offset of new center to parent center
                 const transform = rotation.clone().multiply(new THREE.Matrix4().makeTranslation(result.offset.x, result.offset.y, result.offset.z));
                 transform.decompose(mesh.position, mesh.quaternion, mesh.scale);
-
-                // mesh.position.addScaledVector(parentAsteroid.userData.velocity, parentAsteroid.userData.splitAge);
-                // mesh.position.add(new THREE.Vector3(message.data.parentPosition.x, message.data.parentPosition.y, message.data.parentPosition.z));
                 mesh.position.add(parentAsteroid.position);
 
+                // Velocity
                 const parentWeight = 0.95;
                 const repellingWeight = 0.1;
                 const laserWeight = 0.04;
@@ -69,16 +77,19 @@ export class World {
                     .addScaledVector(message.data.laserDirection, laserWeight);
                 mesh.userData.velocity.z = 0.2 * -Math.sign(mesh.position.z);  // toward z=0
 
+                // Rotational velocity
                 const randomWeight = 0.1;
                 const randomRotation = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
                 const outwardWeight = 0.3;
                 const outwardRotatation = new THREE.Vector3(-rotation.elements[2], -rotation.elements[6], -rotation.elements[10]);
-                // mesh.userData.rotationalVelocity = parentAsteroid.userData.rotationalVelocity.clone()
-                mesh.userData.rotationalVelocity = new THREE.Vector3(message.data.parentRotationalVelocityWorld.x, message.data.parentRotationalVelocityWorld.y, message.data.parentRotationalVelocityWorld.z)
+                mesh.userData.rotationalVelocity = new THREE.Vector3(
+                    message.data.parentRotationalVelocityWorld.x,
+                    message.data.parentRotationalVelocityWorld.y,
+                    message.data.parentRotationalVelocityWorld.z
+                )
                     .multiplyScalar(parentWeight)
                     .addScaledVector(randomRotation, randomWeight)
                     .addScaledVector(outwardRotatation, outwardWeight * sign);
-                // mesh.userData.rotationalVelocity.z -= outwardWeight * sign;
 
                 // Move away from other asteroid part ever so slightly to avoid overlap
                 mesh.position.addScaledVector(repellingVector, 0.002);
@@ -95,6 +106,7 @@ export class World {
 
             });
 
+            // Currently not used due to ammo.js
             const a = this.asteroids[this.asteroids.length - 2];
             const b = this.asteroids[this.asteroids.length - 1];
             a.userData.asteroidCollisionHeat.set(b, a.userData.asteroidCollisionCooldownPeriod);
@@ -107,7 +119,7 @@ export class World {
     }
 
     createCamera() {
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 5, 1000);
         camera.position.set(0, 0, 10);
         camera.up.set(0, 1, 0);
         camera.lookAt(0, 0, 0);
@@ -198,7 +210,7 @@ export class World {
         laser.userData.ttl = ttl;
         laser.userData.damage = damage;
 
-        const light = new THREE.PointLight(0xff6666, 1, 20);
+        const light = new THREE.PointLight(0xff6666, 1, 20, 1.25);
         light.position.copy(laser.position);
         laser.userData.light = light;
 
@@ -280,6 +292,7 @@ export class World {
                     applyRotation(a, dt);
                 }
 
+                // Currently not used due to ammo.js
                 for (const key of a.userData.asteroidCollisionHeat.keys()) {
                     const heat = a.userData.asteroidCollisionHeat.get(key) - dt;
                     if (heat <= 0) {
@@ -368,7 +381,7 @@ function createUniverse() {
     const geo = new THREE.PlaneGeometry(300, 300);
     const texture = generateStarTexture({ minRadius: 1.2, maxRadius: 1.5, starCount: 100 });
     texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     const universe = new THREE.Mesh(geo, material);
     universe.position.z = -140;
     return universe;
@@ -378,7 +391,7 @@ function createUniverse2() {
     const geo = new THREE.PlaneGeometry(600, 600);
     const texture = generateStarTexture({ minRadius: 0.8, maxRadius: 1.2, starCount: 800 });
     texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     const universe = new THREE.Mesh(geo, material);
     universe.position.z = -210;
     return universe;
@@ -393,7 +406,7 @@ function createUniverse3() {
         minBlue: 100, maxBlue: 255,
     });
     texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     const universe = new THREE.Mesh(geo, material);
     universe.position.z = -300;
     return universe;
@@ -408,7 +421,7 @@ function createUniverse4() {
         minBlue: 100, maxBlue: 255,
     });
     texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     const universe = new THREE.Mesh(geo, material);
     universe.position.z = -400;
     return universe;
@@ -446,7 +459,7 @@ function createUniverse6() {
     const textureLoader = new THREE.TextureLoader()
     const texture = textureLoader.load('/media/bright_star.png');
     texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true });
+    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     const universe = new THREE.Mesh(geo, material);
     universe.position.set(10, 15, -50);
     return universe;

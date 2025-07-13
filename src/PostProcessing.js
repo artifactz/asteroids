@@ -1,6 +1,142 @@
 import * as THREE from 'three';
 
+/**
+ * Estimates 2d lighting of a scene layer by adding the light color to nearby pixels.
+ */
+export class SmokeLighting {
+    constructor() {
+        this.ping = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType,
+            transparent: true,
+            depthBuffer: true,
+            stencilBuffer: false,
+        });
+        this.pong = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+            format: THREE.RGBAFormat,
+            type: THREE.UnsignedByteType,
+            transparent: true,
+            depthBuffer: true,
+            stencilBuffer: false,
+        });
 
+        this.smokeLightingMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                tSmoke: { value: this.ping.texture },
+                resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                lights: { value: [] },
+                lightColors: { value: [] },
+                lightIntensities: { value: [] },
+                numLights: { value: 0 },
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                void main() {
+                    vUv = uv;
+                    gl_Position = vec4(position.xyz, 1.0);
+                }
+            `,
+            // TODO make falloff depend on PointLight.decay
+            fragmentShader: `
+                uniform sampler2D tSmoke;
+                uniform vec2 resolution;
+                uniform vec2 lights[10]; // max 10 lights
+                uniform vec3 lightColors[10];
+                uniform float lightIntensities[10];
+                uniform int numLights;
+
+                varying vec2 vUv;
+
+                void main() {
+                    vec4 smoke = texture2D(tSmoke, vUv);
+                    if (smoke.a == 0.0) { discard; }
+                    vec3 litColor = smoke.rgb;
+
+                    for (int i = 0; i < 10; i++) {
+                        if (i >= numLights) break;
+
+                        vec2 lightUV = lights[i];
+                        float dist = distance(vUv, lightUV);
+                        float falloff = exp(-18.0 * dist);
+                        litColor += lightColors[i] * lightIntensities[i] * falloff;
+                    }
+
+                    gl_FragColor = vec4(litColor, smoke.a);
+                }
+            `,
+            transparent: true,
+            blending: THREE.NormalBlending,
+        });
+
+        const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.smokeLightingMaterial);
+        this.scene = new THREE.Scene();
+        this.scene.add(quad);
+
+        this.blend = new Blend(THREE.NormalBlending);
+    }
+
+    /**
+     * Renders scene objects from the specified layer, estimates 2d lighting, and renders them to the screen buffer.
+     */
+    render(renderer, scene, camera, dt, layer = 1) {
+        renderer.setRenderTarget(this.ping);
+        renderer.setClearColor(new THREE.Color(0x000000), 0);  // transparent black
+        renderer.clear();
+        camera.layers.disable(0);
+        camera.layers.enable(layer);
+        renderer.render(scene, camera);
+        camera.layers.disable(layer);
+        camera.layers.enable(0);
+
+        renderer.setRenderTarget(null);
+        this.updateLights(scene, camera);
+        renderer.render(this.scene, orthoCam);
+    }
+
+    /**
+     * Sets shader uniforms from PointLights in scene.
+     */
+    updateLights(scene, camera) {
+        const screenPositions = [];
+        const lightColors = [];
+        const lightIntensities = [];
+        for (const element of scene.children) {
+            if (element instanceof THREE.PointLight) {
+                const light = element;
+                // Convert light position to screen coordinates
+                const vector = new THREE.Vector3();
+                vector.setFromMatrixPosition(light.matrixWorld);
+                vector.project(camera);
+
+                // Normalize to [0, 1] range
+                vector.x = (vector.x + 1) / 2;
+                vector.y = (vector.y + 1) / 2;
+
+                screenPositions.push(new THREE.Vector2(vector.x, vector.y));
+                lightColors.push(light.color.clone());
+                lightIntensities.push(light.intensity);
+                console.log(light.intensity);
+            }
+        }
+
+        this.smokeLightingMaterial.uniforms.numLights.value = screenPositions.length;
+
+        for (; screenPositions.length < 10; ) {
+            screenPositions.push(new THREE.Vector2());
+            lightColors.push(new THREE.Color(0, 0, 0));
+            lightIntensities.push(0);
+        }
+
+        this.smokeLightingMaterial.uniforms.lights.value = screenPositions;
+        this.smokeLightingMaterial.uniforms.lightColors.value = lightColors;
+        this.smokeLightingMaterial.uniforms.lightIntensities.value = lightIntensities;
+    }
+}
+
+
+/**
+ * Ghost glow effect -- currently not used.
+ */
 export class BlurLayer {
     constructor(fadePerSecond = 0.7) {
         this.fadePerSecond = fadePerSecond;
@@ -143,11 +279,15 @@ class Blur {
     }
 }
 
-class Blend {
-    constructor() {
+
+/**
+ * Fullscreen blending (or blitting).
+ */
+export class Blend {
+    constructor(blending = THREE.AdditiveBlending) {
         this.mat = new THREE.MeshBasicMaterial({
             map: null,
-            blending: THREE.AdditiveBlending,
+            blending: blending,
             transparent: true,
             depthTest: false,
         });
