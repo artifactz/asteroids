@@ -367,7 +367,7 @@ function createPlayer() {
         gltf.scene.scale.set(0.0667, 0.0667, 0.0667);
         player.add(gltf.scene);
     });
-    player.userData.maxSpeed = 6.0;
+    player.userData.maxSpeed = 8.0;
     player.userData.speed = 0.0;
     player.userData.maxAccel = 6.0;
     player.userData.accel = 0.0;

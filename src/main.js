@@ -3,13 +3,15 @@ import Ammo from 'ammo.js';
 import { getMousePositionAtZ, rotateTowards, moveCamera } from './Targeting.js';
 import { World, checkLaserHit } from './GameObjects.js';
 import { SmokeLighting, Blend } from './PostProcessing.js';
+import { initHud, updateThrustBar } from './Hud.js';
 
 const clock = new THREE.Clock();
 
-const renderer = new THREE.WebGLRenderer(); // { antialias: true }
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three-canvas') }); // { antialias: true }
 renderer.autoClear = false;
 renderer.setSize(window.innerWidth, window.innerHeight);
-document.body.appendChild(renderer.domElement);
+
+initHud();
 
 // Off-screen render target used to access main scene depth buffer
 const renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
@@ -76,6 +78,8 @@ function animate() {
     }
 
     world.player.userData.speed += world.player.userData.accel * dt;
+    world.player.userData.speed = Math.max(-world.player.userData.maxSpeed, Math.min(world.player.userData.speed, world.player.userData.maxSpeed));
+    updateThrustBar(Math.abs(world.player.userData.speed) / world.player.userData.maxSpeed);
     world.player.position.set(
         world.player.position.x + dt * Math.cos(world.player.rotation.z) * world.player.userData.speed,
         world.player.position.y + dt * Math.sin(world.player.rotation.z) * world.player.userData.speed,
