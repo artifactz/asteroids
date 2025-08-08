@@ -77,7 +77,7 @@ export class ParticleSystem {
         this.lights = [];
 
         const textureLoader = new THREE.TextureLoader()
-        textureLoader.load('/media/smoke.png', (texture) => {
+        textureLoader.load('media/smoke.png', (texture) => {
             texture.colorSpace = THREE.SRGBColorSpace;
             this.smokeTexture = createColorAlphaTexture(texture, 76, 76, 76);
         });

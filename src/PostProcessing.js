@@ -115,7 +115,6 @@ export class SmokeLighting {
                 screenPositions.push(new THREE.Vector2(vector.x, vector.y));
                 lightColors.push(light.color.clone());
                 lightIntensities.push(light.intensity);
-                console.log(light.intensity);
             }
         }
 

@@ -6,6 +6,7 @@ import Ammo from 'ammo.js';
 import { createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
 import { ParticleSystem } from './Particles.js';
 import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
+import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -38,7 +39,7 @@ export class World {
         this.lasers = [];
         this.particles = new ParticleSystem(this.scene, this.camera, depthTexture);
 
-        this.splitWorker = new Worker("/src/workers/AsteroidSplitWorker.js", { type: 'module' });
+        this.splitWorker = new AsteroidSplitWorker();
         /** Handles worker results. */
         this.splitWorker.onmessage = (message) => {
             let sign = 1;
@@ -359,7 +360,7 @@ export class World {
 function createPlayer() {
     const player = new THREE.Group();
     const loader = new GLTFLoader();
-    loader.load("/media/spacecraft.glb", (gltf) => {
+    loader.load("media/spacecraft.glb", (gltf) => {
         gltf.scene.position.z = -0.1;
         gltf.scene.rotation.x = 0.5 * Math.PI;
         gltf.scene.rotation.y = 0.5 * Math.PI;
@@ -457,7 +458,7 @@ function createUniverse5(starCount = 2500, minZ = -350, maxZ = -90) {
 function createUniverse6() {
     const geo = new THREE.PlaneGeometry(55, 55);
     const textureLoader = new THREE.TextureLoader()
-    const texture = textureLoader.load('/media/bright_star.png');
+    const texture = textureLoader.load('media/bright_star.png');
     texture.colorSpace = THREE.SRGBColorSpace;
     const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
     const universe = new THREE.Mesh(geo, material);
