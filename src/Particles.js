@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SurfaceSampler, pointToLineDistanceSquared } from './GeometryUtils.js';
+import { SurfaceSampler, iteratePoints, pointToLineDistanceSquared } from './GeometryUtils.js';
 
 
 /**
@@ -219,6 +219,43 @@ export class ParticleSystem {
 
         const smokeLifetime = 5.0 + (2 * Math.random() - 1);
         this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 80.0, 0.4, this.smokeTexture, THREE.NormalBlending, 0.8, 1);
+    }
+
+    handlePlayerBreakdown(player, debrisRandomness = 0.3, smokeRandomness = 0.7) {
+        const numChunks = 15;
+        const chunkSize = 15;
+        const points = Array.from(iteratePoints(player)).map((point) => {
+            point.applyEuler(player.rotation);
+            point.multiply(player.scale);
+            point.add(player.position);
+            return point;
+        });
+        shuffleArray(points);
+        var pointIndex = 0;
+
+        for (let i = 0; i < numChunks; i++) {
+            const positions = [];
+            const velocities = [];
+            for (let j = 0; j < chunkSize; j++) {
+                positions.push(points[pointIndex].x, points[pointIndex].y, points[pointIndex].z);
+                velocities.push(
+                    player.userData.velocity.x + debrisRandomness * 2 * (Math.random() - 0.5),
+                    player.userData.velocity.y + debrisRandomness * 2 * (Math.random() - 0.5),
+                    player.userData.velocity.z + debrisRandomness * 2 * (Math.random() - 0.5)
+                );
+                pointIndex = (pointIndex + 1) % points.length;
+            }
+            const debrisLifetime = 4.0 + 2.0 * (Math.random() - 0.5);
+            this.addColorParticleChunk(positions, velocities, debrisLifetime, 3.0, 0.01, 0x555555, THREE.NormalBlending, 0.025, 1);
+
+            for (let j = 0; j < chunkSize; j++) {
+                velocities[j * 3] += smokeRandomness * 2 * (Math.random() - 0.5);
+                velocities[j * 3 + 1] += smokeRandomness * 2 * (Math.random() - 0.5);
+                velocities[j * 3 + 2] += smokeRandomness * 2 * (Math.random() - 0.5);
+            }
+            const smokeLifetime = 5.0 + 3.0 * (Math.random() - 0.5);
+            this.addTextureParticleChunk(positions, velocities, smokeLifetime, 80.0, 0.4, this.smokeTexture, THREE.NormalBlending, 0.8, 1);
+        }
     }
 
     generateSparks(position, direction, count, spreadAngle = 0.25 * Math.PI, minSpeedRatio = 0.0667, maxSpeedRatio = 0.333) {
@@ -508,4 +545,17 @@ function createColorAlphaTexture(texture, r, g, b) {
     newTexture.minFilter = THREE.LinearFilter;
     newTexture.magFilter = THREE.LinearFilter;
     return newTexture;
+}
+
+
+/**
+ * Randomizes array in-place.
+ */
+function shuffleArray(array) {
+    for (var i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const temp = array[i];
+        array[i] = array[j];
+        array[j] = temp;
+    }
 }

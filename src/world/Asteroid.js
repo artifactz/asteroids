@@ -36,6 +36,7 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
     mesh.userData.asteroidCollisionCooldownPeriod = 0.1;
     mesh.userData.asteroidCollisionHeat = new Map();
     mesh.userData.health = 30 * Math.sqrt(mesh.userData.volume) + randomHealth * Math.random();
+    mesh.userData.materialValue = 2.5;
     mesh.userData.splitAge = null;
     return mesh;
 }

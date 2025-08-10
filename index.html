@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="media/icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
     <title>asteroids</title>
   </head>
@@ -12,6 +15,11 @@
       <canvas id="three-canvas"></canvas>
       <div id="ui-overlay">
         <div id="thrust-bar-container"></div>
+        <div id="material-container"><div>Material:</div><div id="material-text"></div></div>
+        <div id="game-over-container">
+          <div id="game-over-text">Game Over</div><br>
+          <div id="restart-text">[F5] to restart</div>
+        </div>
       </div>
     </div>
     <script type="module" src="/src/main.js"></script>

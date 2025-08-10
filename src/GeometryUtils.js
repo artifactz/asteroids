@@ -331,6 +331,31 @@ export function* iterateTriangles(geometry) {
     }
 }
 
+/**
+ * Iterates over Vector3 points of a mesh or group (and its sub-groups) in the local coordinate frame of the given object.
+ * @param {THREE.Group | THREE.Mesh} group
+ */
+export function* iteratePoints(group) {
+    if (group instanceof THREE.Group) {
+        for (const child of group.children) {
+            for (const point of iteratePoints(child)) {
+                point.applyEuler(child.rotation);
+                point.multiply(child.scale);
+                point.add(child.position);
+                yield point;
+            }
+        }
+    } else if (group instanceof THREE.Mesh) {
+        const mesh = group;
+        const pos = mesh.geometry.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+            yield new THREE.Vector3().fromBufferAttribute(pos, i);
+        }
+    } else {
+        throw new Error("Unsupported group type for iteratePoints");
+    }
+}
+
 function pointToSegmentDistanceSquared(p, a, b) {
     const ab = new THREE.Vector3().subVectors(b, a);
     const ap = new THREE.Vector3().subVectors(p, a);

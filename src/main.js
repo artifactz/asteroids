@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import Ammo from 'ammo.js';
 import { getMousePositionAtZ, rotateTowards, moveCamera } from './Targeting.js';
-import { World, checkLaserHit } from './GameObjects.js';
+import { World, WorldState, checkLaserHit } from './GameObjects.js';
 import { SmokeLighting, Blend } from './PostProcessing.js';
-import { initHud, updateThrustBar } from './Hud.js';
+import { initHud, updateThrustBar, showGameOver, updateMaterial } from './Hud.js';
 
 const clock = new THREE.Clock();
 
@@ -69,25 +69,18 @@ function animate() {
         world.brightStar.rotation.z = Math.atan2(world.brightStar.position.y - world.camera.position.y, world.brightStar.position.x - world.camera.position.x);
     }
 
-    if (keys['w']) {
+    if (world.state == WorldState.Playing && keys['w']) {
         world.player.userData.accel = world.player.userData.maxAccel;
-    } else if (keys['s']) {
+    } else if (world.state == WorldState.Playing && keys['s']) {
         world.player.userData.accel = -world.player.userData.maxAccel;
     } else {
         world.player.userData.accel = 0;
     }
 
-    world.player.userData.speed += world.player.userData.accel * dt;
-    world.player.userData.speed = Math.max(-world.player.userData.maxSpeed, Math.min(world.player.userData.speed, world.player.userData.maxSpeed));
-    updateThrustBar(Math.abs(world.player.userData.speed) / world.player.userData.maxSpeed);
-    world.player.position.set(
-        world.player.position.x + dt * Math.cos(world.player.rotation.z) * world.player.userData.speed,
-        world.player.position.y + dt * Math.sin(world.player.rotation.z) * world.player.userData.speed,
-        0
-    );
+    world.updatePlayer(dt);
 
     // Shoot
-    if (mouse[0] && world.player.userData.laserHeat <= 0) {
+    if (world.state == WorldState.Playing && mouse[0] && world.player.userData.laserHeat <= 0) {
         const noiseRad = (2 * Math.random() - 1) * world.player.userData.laserSpreadRad;
         world.createLaser(world.player.position, world.player.rotation.z + noiseRad);
         world.player.userData.laserHeat = world.player.userData.laserCooldownPeriod;
@@ -96,6 +89,9 @@ function animate() {
 
     // Move lasers
     world.updateLasers(dt);
+
+    // Advance physics
+    world.physics.stepSimulation(dt, 10);
 
     // Move asteroids
     world.updateAsteroids(dt);
@@ -114,6 +110,10 @@ function animate() {
 
     world.particles.update(dt);
 
+    // Update UI
+    updateThrustBar(Math.abs(world.player.userData.speed) / world.player.userData.maxSpeed);
+    updateMaterial(world.player.userData.material);
+
     renderer.setRenderTarget(renderTarget);
     renderer.setClearColor(world.clearColor);
     renderer.clear();
@@ -123,6 +123,11 @@ function animate() {
     blend.render(renderer, renderTarget.texture);
 
     smokeLighting.render(renderer, world.scene, world.camera, dt);
+
+    if (world.state == WorldState.EndScreen && world.prevState == WorldState.Playing) {
+        showGameOver();
+    }
+    world.prevState = world.state;
 }
 
 animate();

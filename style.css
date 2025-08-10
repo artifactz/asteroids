@@ -1,5 +1,7 @@
 body {
   margin: 0;
+  font-family: Orbitron;
+  font-weight: 500;
 }
 
 #game-container {
@@ -47,4 +49,44 @@ body {
 
 .thrust-segment.active {
   background: #36b4ff;
+}
+
+#material-container {
+  position: absolute;
+  bottom: 22px;
+  left: 70px;
+  width: 40px;
+  height: 20px;
+  display: flex;
+  font-size: 20px;
+  text-align: center;
+  color: #36b4ff;
+}
+
+#material-text {
+  margin-left: 0.5em;
+}
+
+#game-over-container {
+  display: none;
+  position: absolute;
+  bottom: 50%;
+  left: 0px;
+  width: 100%;
+  transform: translateY(50%);
+  align-items: center;
+}
+
+#game-over-text {
+  width: 100%;
+  font-size: 128px;
+  text-align: center;
+  color: #f44741b9;
+}
+
+#restart-text {
+  width: 100%;
+  font-size: 24px;
+  text-align: center;
+  color: #f44741;
 }

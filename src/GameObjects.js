@@ -5,12 +5,18 @@ import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import Ammo from 'ammo.js';
 import { createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
 import { ParticleSystem } from './Particles.js';
-import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
+import { GeometryManipulator, simplifyGeometry, iteratePoints, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
 import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
+
+export const WorldState = {
+    StartScreen: 'StartScreen',
+    Playing: 'Playing',
+    EndScreen: 'EndScreen',
+};
 
 /**
  * World class that manages the game scene, camera, and physics.
@@ -20,13 +26,15 @@ export class World {
      * @param {THREE.DepthTexture} depthTexture  Main scene depth buffer for the particle renderer.
      */
     constructor(depthTexture) {
+        this.prevState = null;
+        this.state = WorldState.Playing;
         this.scene = new THREE.Scene();
         this.clearColor = new THREE.Color(0x000000);
 
         this.camera = this.createCamera();
         this.addDefaultLights();
         this.addPreliminaryBackground();
-        this.player = createPlayer();
+        this.player = this.createPlayer();
         this.scene.add(this.player);
 
         this.asteroids = [createAsteroid(createAsteroidGeometry()), createAsteroid(createAsteroidGeometry())];
@@ -146,19 +154,98 @@ export class World {
         this.scene.add(this.brightStar);
     }
 
+    createPlayer() {
+        const player = new THREE.Group();
+        const loader = new GLTFLoader();
+        loader.load("media/spacecraft.glb", (gltf) => {
+            gltf.scene.position.z = -0.1;
+            gltf.scene.rotation.x = 0.5 * Math.PI;
+            gltf.scene.rotation.y = 0.5 * Math.PI;
+            gltf.scene.scale.set(0.0667, 0.0667, 0.0667);
+            player.add(gltf.scene);
+
+            if (this.shouldInitializePlayerPhysics) {
+                this.addRigidBodyPhysics(this.player, this.player.userData.mass);
+            } else {
+                this.shouldInitializePlayerPhysics = true;
+            }
+        });
+        player.userData = {
+            maxSpeed: 8.0,
+            speed: 0.0,
+            maxAccel: 6.0,
+            accel: 0.0,
+            rotationalSpeed: 3.9,
+            laserCooldownPeriod: 0.333,
+            laserHeat: 0.0,
+            laserSpreadRad: 0.01 * Math.PI,
+            rotationalVelocity: new THREE.Vector3(0, 0, 0),
+            mass: 0.18,
+            material: 0.0,
+        }
+
+        Object.defineProperty(player.userData, "velocity", {
+            get: function () { return new THREE.Vector3(
+                player.userData.speed * Math.cos(player.rotation.z),
+                player.userData.speed * Math.sin(player.rotation.z),
+                0
+            ); }
+        })
+
+        return player;
+    }
+
+    updatePlayer(dt) {
+        if (this.player.userData.physicsBody) {
+            // Check if a collision happened
+            const pVel = this.player.userData.physicsBody.getLinearVelocity();
+            const oVel = this.player.userData.originalVelocity;
+            if (oVel && (oVel.x() != pVel.x() || oVel.y() != pVel.y() || oVel.z() != pVel.z())) {
+                this.handlePlayerCollision();
+            }
+        }
+
+        // Handle movement at mesh level
+        this.player.userData.speed += this.player.userData.accel * dt;
+        this.player.userData.speed = Math.max(-this.player.userData.maxSpeed, Math.min(this.player.userData.speed, this.player.userData.maxSpeed));
+        this.player.position.set(
+            this.player.position.x + dt * Math.cos(this.player.rotation.z) * this.player.userData.speed,
+            this.player.position.y + dt * Math.sin(this.player.rotation.z) * this.player.userData.speed,
+            0
+        );
+
+        // Update physics state from mesh values for proper collision detection
+        if (this.player.userData.physicsBody) {
+            const transform = new Ammo.btTransform();
+            transform.setIdentity();
+            transform.setOrigin(new Ammo.btVector3(this.player.position.x, this.player.position.y, this.player.position.z));
+            const quaternion = new THREE.Quaternion().setFromEuler(this.player.rotation);
+            transform.setRotation(new Ammo.btQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w));
+            this.player.userData.physicsBody.setMotionState(new Ammo.btDefaultMotionState(transform));
+            this.player.userData.originalVelocity = new Ammo.btVector3(this.player.userData.velocity.x, this.player.userData.velocity.y, this.player.userData.velocity.z);
+            this.player.userData.physicsBody.setLinearVelocity(this.player.userData.originalVelocity);
+            this.player.userData.physicsBody.setAngularVelocity(new Ammo.btVector3(this.player.userData.rotationalVelocity.x, this.player.userData.rotationalVelocity.y, this.player.userData.rotationalVelocity.z));
+        }
+    }
+
     setPhysics(physicsWorld) {
         this.physics = physicsWorld;
         this.asteroids.forEach((asteroid) => {
             this.addRigidBodyPhysics(asteroid, asteroid.userData.volume);
         });
+
+        if (this.shouldInitializePlayerPhysics) {
+            this.addRigidBodyPhysics(this.player, this.player.userData.mass);
+        } else {
+            this.shouldInitializePlayerPhysics = true;
+        }
     }
 
-    addRigidBodyPhysics(mesh, mass = 1) {
-        const vertices = mesh.geometry.attributes.position.array;
+    addRigidBodyPhysics(mesh, mass = 1, restitution = 1.9, friction = 0.0, rollingFriction = 0.0, dampingA = 0.0, dampingB = 0.0) {
         const shape = new Ammo.btConvexHullShape();
         shape.setMargin(0);
-        for (let i = 0; i < vertices.length; i += 3) {
-            const vertex = new Ammo.btVector3(vertices[i], vertices[i + 1], vertices[i + 2]);
+        for (const vector of iteratePoints(mesh)) {
+            const vertex = new Ammo.btVector3(vector.x, vector.y, vector.z);
             shape.addPoint(vertex, true);
         }
 
@@ -180,10 +267,10 @@ export class World {
 
         body.setActivationState(4);  // DISABLE_DEACTIVATION
 
-        body.setRestitution(1.8 + 0.1 * Math.random());
-        body.setFriction(0.0);
-        body.setRollingFriction(0.0);
-        body.setDamping(0.0, 0.0);
+        body.setRestitution(restitution);
+        body.setFriction(friction);
+        body.setRollingFriction(rollingFriction);
+        body.setDamping(dampingA, dampingB);
 
         this.physics.addRigidBody(body);
         mesh.userData.physicsBody = body;
@@ -275,14 +362,13 @@ export class World {
     updateAsteroids(dt) {
         const minVolume = 0.1;
 
-        this.physics.stepSimulation(dt, 10);
-
         this.asteroids.forEach(a => {
             if (a.userData.volume < minVolume) {
                 this.particles.handleDefaultBreakdown(a);
                 this.scene.remove(a);
                 this.physics.removeRigidBody(a.userData.physicsBody);
                 a.isRemoved = true;
+                this.player.userData.material += a.userData.materialValue * a.userData.volume;
             } else {
                 if (!this.updateRigidBodyPhysics(a)) {
                     a.position.addScaledVector(a.userData.velocity, dt);
@@ -309,6 +395,11 @@ export class World {
         this.asteroids = this.asteroids.filter(a => !a.isRemoved);
     }
 
+    /**
+     * Updates mesh position and orientation from its physics state. Updates physics state when passing z=0 to stay.
+     * @param {*} mesh
+     * @returns {boolean} True if mesh was updated, false if not.
+     */
     updateRigidBodyPhysics(mesh) {
         if (!mesh.userData.physicsBody) { return false; }
         const ms = mesh.userData.physicsBody.getMotionState();
@@ -355,27 +446,14 @@ export class World {
             console.timeEnd('splitAsteroid');
         }
     }
-}
 
-function createPlayer() {
-    const player = new THREE.Group();
-    const loader = new GLTFLoader();
-    loader.load("media/spacecraft.glb", (gltf) => {
-        gltf.scene.position.z = -0.1;
-        gltf.scene.rotation.x = 0.5 * Math.PI;
-        gltf.scene.rotation.y = 0.5 * Math.PI;
-        gltf.scene.scale.set(0.0667, 0.0667, 0.0667);
-        player.add(gltf.scene);
-    });
-    player.userData.maxSpeed = 8.0;
-    player.userData.speed = 0.0;
-    player.userData.maxAccel = 6.0;
-    player.userData.accel = 0.0;
-    player.userData.rotationalSpeed = 3.9;
-    player.userData.laserCooldownPeriod = 0.333;
-    player.userData.laserHeat = 0.0;
-    player.userData.laserSpreadRad = 0.01 * Math.PI;
-    return player;
+    handlePlayerCollision() {
+        this.particles.handlePlayerBreakdown(this.player);
+        this.removeRigidBodyPhysics(this.player);
+        this.player.userData.speed = 0.0;
+        this.player.clear();
+        this.state = WorldState.EndScreen;
+    }
 }
 
 function createUniverse() {

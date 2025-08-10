@@ -34,6 +34,7 @@ export function rotateTowards(actor, point, dt) {
     const rotation = Math.min(maxRotation, Math.max(-maxRotation, difference));
 
     actor.rotation.z += rotation;
+    actor.userData.rotationalVelocity = new THREE.Vector3(0, 0, rotation / dt);
 }
 
 
