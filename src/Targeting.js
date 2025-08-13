@@ -30,7 +30,7 @@ export function getMousePositionAtZ(canvasRect, camera, mouseX, mouseY, worldZ) 
 export function rotateTowards(actor, point, dt) {
     const targetOrientation = Math.atan2(point.y - actor.position.y, point.x - actor.position.x);
     const difference = getAngleDifference(targetOrientation, actor.rotation.z);
-    const maxRotation = actor.userData.rotationalSpeed * dt;
+    const maxRotation = actor.userData.maxRotationalSpeed * dt;
     const rotation = Math.min(maxRotation, Math.max(-maxRotation, difference));
 
     actor.rotation.z += rotation;
@@ -47,6 +47,15 @@ export function moveCamera(world, aimPoint, dt) {
     world.camera.position.set(
         (1 - alpha) * destination.x + alpha * world.camera.position.x,
         (1 - alpha) * destination.y + alpha * world.camera.position.y,
+        world.camera.position.z
+    );
+}
+
+
+export function fixCameraOnPlayer(world, dx = 0, dy = 0) {
+    world.camera.position.set(
+        world.player.position.x + dx,
+        world.player.position.y + dy,
         world.camera.position.z
     );
 }

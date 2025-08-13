@@ -4,6 +4,7 @@ import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
 import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import Ammo from 'ammo.js';
 import { createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
+import { Universe, UniverseLayer } from './world/Universe.js';
 import { ParticleSystem } from './Particles.js';
 import { GeometryManipulator, simplifyGeometry, iteratePoints, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
 import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
@@ -12,12 +13,6 @@ THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 
-export const WorldState = {
-    StartScreen: 'StartScreen',
-    Playing: 'Playing',
-    EndScreen: 'EndScreen',
-};
-
 /**
  * World class that manages the game scene, camera, and physics.
  */
@@ -25,25 +20,19 @@ export class World {
     /**
      * @param {THREE.DepthTexture} depthTexture  Main scene depth buffer for the particle renderer.
      */
-    constructor(depthTexture) {
-        this.prevState = null;
-        this.state = WorldState.Playing;
+    constructor(depthTexture, asteroidExplosionVolume = 0.15, asteroidRemovalDistance = 60) {
+        this.asteroidExplosionVolume = asteroidExplosionVolume;
+        this.asteroidRemovalDistance = asteroidRemovalDistance;
         this.scene = new THREE.Scene();
         this.clearColor = new THREE.Color(0x000000);
 
         this.camera = this.createCamera();
         this.addDefaultLights();
-        this.addPreliminaryBackground();
+        this.universe = new Universe(this.scene, this.camera);
         this.player = this.createPlayer();
         this.scene.add(this.player);
 
-        this.asteroids = [createAsteroid(createAsteroidGeometry()), createAsteroid(createAsteroidGeometry())];
-        this.asteroids[0].position.set(3, 1, 0);
-        this.asteroids[1].position.set(8, 1.5, 0);
-        this.asteroids[1].userData.velocity.set(-0.7, -0.1, 0);
-        this.scene.add(this.asteroids[0]);
-        this.scene.add(this.asteroids[1]);
-
+        this.asteroids = [];
         this.lasers = [];
         this.particles = new ParticleSystem(this.scene, this.camera, depthTexture);
 
@@ -144,16 +133,6 @@ export class World {
         this.scene.add(aLight);
     }
 
-    addPreliminaryBackground() {
-        this.scene.add(createUniverse());
-        this.scene.add(createUniverse2());
-        this.scene.add(createUniverse3());
-        this.scene.add(createUniverse4());
-        this.scene.add(createUniverse5());
-        this.brightStar = createUniverse6();
-        this.scene.add(this.brightStar);
-    }
-
     createPlayer() {
         const player = new THREE.Group();
         const loader = new GLTFLoader();
@@ -175,12 +154,14 @@ export class World {
             speed: 0.0,
             maxAccel: 6.0,
             accel: 0.0,
-            rotationalSpeed: 3.9,
-            laserCooldownPeriod: 0.333,
+            maxRotationalSpeed: 3.8,
+            laserCooldownPeriod: 0.2,
             laserHeat: 0.0,
             laserSpreadRad: 0.01 * Math.PI,
+            laserSpeed: 16,
             rotationalVelocity: new THREE.Vector3(0, 0, 0),
             mass: 0.18,
+            isAlive: true,
             material: 0.0,
         }
 
@@ -225,14 +206,14 @@ export class World {
             this.player.userData.originalVelocity = new Ammo.btVector3(this.player.userData.velocity.x, this.player.userData.velocity.y, this.player.userData.velocity.z);
             this.player.userData.physicsBody.setLinearVelocity(this.player.userData.originalVelocity);
             this.player.userData.physicsBody.setAngularVelocity(new Ammo.btVector3(this.player.userData.rotationalVelocity.x, this.player.userData.rotationalVelocity.y, this.player.userData.rotationalVelocity.z));
+            Ammo.destroy(transform); // avoid ammo js memory leak
         }
+
+        this.player.userData.laserHeat = Math.max(0, this.player.userData.laserHeat - dt);
     }
 
     setPhysics(physicsWorld) {
         this.physics = physicsWorld;
-        this.asteroids.forEach((asteroid) => {
-            this.addRigidBodyPhysics(asteroid, asteroid.userData.volume);
-        });
 
         if (this.shouldInitializePlayerPhysics) {
             this.addRigidBodyPhysics(this.player, this.player.userData.mass);
@@ -285,7 +266,7 @@ export class World {
         mesh.userData.physicsBody = null;
     }
 
-    createLaser(position, angle, speed = 14.4, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
+    createLaser(position, angle, speed, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
         const geo = new THREE.CylinderGeometry(radius, radius, length);
         geo.rotateZ(Math.PI / 2);
         const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
@@ -307,6 +288,64 @@ export class World {
         this.scene.add(laser);
 
         return laser;
+    }
+
+    spawnAsteroid(distance = 32, speed = 1.0) {
+        const asteroid = createAsteroid(createAsteroidGeometry());
+
+        // Calculate asteroid position and velocity such that it collides with the player, assuming constant movement.
+
+        // position_asteroid + t * velocity_asteroid == position_player + t * velocity_player
+
+        // in 2D
+        // (1) a + t * c == p + t * x
+        // (2) b + t * d == q + t * y
+
+        // known: p, q, x, y
+        // (a - p)^2 + (b - q)^2 == r^2 == distance^2
+        // c^2 + d^2 == s^2 == speed^2
+
+        // Construct right triangle with a = asteroid_movement, b = player_movement, c = distance.
+        // Point C is the collision point. This means the asteroid always hits from the side.
+        // (t * c)^2 + (t * d)^2 + (t * x)^2 + (t * y)^2 == r^2
+
+        // Rearrange
+        // t^2 * (c^2 + x^2 + y^2 + d^2) == r^2
+
+        // Insert asteroid speed
+        // t^2 * (x^2 + y^2 + s^2) == r^2
+
+        // Rearrange
+        // t^2 == r^2 / (x^2 + y^2 + s^2)
+        // => t == sqrt(r^2 / (x^2 + y^2 + s^2))
+
+        // So we can calculate the collision time
+        const v = this.player.userData.velocity;
+        const t = Math.sqrt(distance * distance / (v.x * v.x + v.y * v.y + speed * speed));
+
+        // And thus the collision point
+        const vector = this.player.position.clone().addScaledVector(this.player.userData.velocity, t);
+
+        // The asteroid position is on a circle with r=distance around the player
+        // And on a circle with r=speed*t around the collision point
+        const [[x1, y1], [x2, y2]] = intersectTwoCircles(
+            this.player.position.x, this.player.position.y, distance,
+            vector.x, vector.y, speed * t
+        );
+        // Both intersections are equally far from the player, choose one randomly
+        const [x, y] = Math.random() < 0.5 ? [x1, y1] : [x2, y2];
+
+        asteroid.position.set(x, y, 0);
+
+        // Steer towards collision point
+        vector.sub(asteroid.position).normalize().multiplyScalar(speed);
+        asteroid.userData.velocity.copy(vector);
+
+        this.addRigidBodyPhysics(asteroid, asteroid.userData.volume)
+        this.asteroids.push(asteroid);
+        this.scene.add(asteroid);
+
+        console.log("Spawned asteroid distanceToPlayer=" + asteroid.position.clone().sub(this.player.position).length());
     }
 
     /**
@@ -360,16 +399,21 @@ export class World {
     }
 
     updateAsteroids(dt) {
-        const minVolume = 0.1;
-
         this.asteroids.forEach(a => {
-            if (a.userData.volume < minVolume) {
+            if (a.userData.volume < this.asteroidExplosionVolume) {
+                // Explode asteroid and grant materials when it becomes too small
                 this.particles.handleDefaultBreakdown(a);
                 this.scene.remove(a);
                 this.physics.removeRigidBody(a.userData.physicsBody);
                 a.isRemoved = true;
                 this.player.userData.material += a.userData.materialValue * a.userData.volume;
+            } else if (a.position.clone().sub(this.player.position).length() > this.asteroidRemovalDistance) {
+                // Remove asteroid when it drifts too far
+                this.scene.remove(a);
+                this.physics.removeRigidBody(a.userData.physicsBody);
+                a.isRemoved = true;
             } else {
+                // Move
                 if (!this.updateRigidBodyPhysics(a)) {
                     a.position.addScaledVector(a.userData.velocity, dt);
                     if ((a.position.z > 0 && a.userData.velocity.z > 0) || a.position.z < 0 && a.userData.velocity.z < 0) {
@@ -393,6 +437,10 @@ export class World {
             }
         });
         this.asteroids = this.asteroids.filter(a => !a.isRemoved);
+    }
+
+    updateUniverse() {
+        this.universe.update(this.camera);
     }
 
     /**
@@ -450,142 +498,10 @@ export class World {
     handlePlayerCollision() {
         this.particles.handlePlayerBreakdown(this.player);
         this.removeRigidBodyPhysics(this.player);
+        this.player.userData.isAlive = false;
         this.player.userData.speed = 0.0;
         this.player.clear();
-        this.state = WorldState.EndScreen;
     }
-}
-
-function createUniverse() {
-    const geo = new THREE.PlaneGeometry(300, 300);
-    const texture = generateStarTexture({ minRadius: 1.2, maxRadius: 1.5, starCount: 100 });
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
-    const universe = new THREE.Mesh(geo, material);
-    universe.position.z = -140;
-    return universe;
-}
-
-function createUniverse2() {
-    const geo = new THREE.PlaneGeometry(600, 600);
-    const texture = generateStarTexture({ minRadius: 0.8, maxRadius: 1.2, starCount: 800 });
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
-    const universe = new THREE.Mesh(geo, material);
-    universe.position.z = -210;
-    return universe;
-}
-
-function createUniverse3() {
-    const geo = new THREE.PlaneGeometry(900, 900);
-    const texture = generateStarTexture({
-        minRadius: 0.45, maxRadius: 0.8, starCount: 1200,
-        minRed: 100, maxRed: 255,
-        minGreen: 175, maxGreen: 175,
-        minBlue: 100, maxBlue: 255,
-    });
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
-    const universe = new THREE.Mesh(geo, material);
-    universe.position.z = -300;
-    return universe;
-}
-
-function createUniverse4() {
-    const geo = new THREE.PlaneGeometry(1200, 1200);
-    const texture = generateStarTexture({
-        minRadius: 0.25, maxRadius: 0.45, starCount: 10000, minBrightness: 0.3, maxBrightness: 1.0,
-        minRed: 100, maxRed: 255,
-        minGreen: 160, maxGreen: 175,
-        minBlue: 100, maxBlue: 255,
-    });
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
-    const universe = new THREE.Mesh(geo, material);
-    universe.position.z = -400;
-    return universe;
-}
-
-function createUniverse5(starCount = 2500, minZ = -350, maxZ = -90) {
-    const positions = [];
-
-    for (let i = 0; i < starCount; i++) {
-        const z = minZ + Math.random() * (maxZ - minZ);
-        const x = -z * 3.5 * (Math.random() - 0.5)
-        const y = -z * 3.5 * (Math.random() - 0.5)
-        positions.push(x, y, z);
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-
-    const material = new THREE.PointsMaterial({
-        color: 0xffffff,
-        size: 0.5,
-        transparent: true,
-        opacity: 1,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-    });
-
-    const stars = new THREE.Points(geometry, material);
-
-    return stars;
-}
-
-function createUniverse6() {
-    const geo = new THREE.PlaneGeometry(55, 55);
-    const textureLoader = new THREE.TextureLoader()
-    const texture = textureLoader.load('media/bright_star.png');
-    texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
-    const universe = new THREE.Mesh(geo, material);
-    universe.position.set(10, 15, -50);
-    return universe;
-}
-
-function generateStarTexture({
-    size = 1536,
-    starCount = 500,
-    minRadius = 0.5,
-    maxRadius = 2.5,
-    minBrightness = 0.8,
-    maxBrightness = 1.0,
-    minRed = 255,
-    maxRed = 255,
-    minGreen = 255,
-    maxGreen = 255,
-    minBlue = 255,
-    maxBlue = 255,
-    bgColor = "black",
-} = {}) {
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = size;
-
-    const ctx = canvas.getContext("2d");
-
-    // Background
-    ctx.fillStyle = bgColor;
-    ctx.fillRect(0, 0, size, size);
-
-    // Draw stars
-    for (let i = 0; i < starCount; i++) {
-        const x = Math.random() * size;
-        const y = Math.random() * size;
-        const radius = minRadius + Math.random() * (maxRadius - minRadius);
-
-        const alpha = minBrightness + Math.random() * (maxBrightness - minBrightness);
-
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        const r = minRed + Math.random() * (maxRed - minRed);
-        const g = minGreen + Math.random() * (maxGreen - minGreen);
-        const b = minBlue + Math.random() * (maxBlue - minBlue);
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
-        ctx.fill();
-    }
-
-    return new THREE.CanvasTexture(canvas);
 }
 
 export function checkLaserHit(laser, asteroids) {
@@ -744,4 +660,40 @@ function applyRotation(mesh, dt) {
     const axis = mesh.userData.rotationalVelocity.clone().normalize();
     const deltaQuat = new THREE.Quaternion().setFromAxisAngle(axis, angle);
     mesh.quaternion.multiplyQuaternions(deltaQuat, mesh.quaternion);
+}
+
+/**
+ * Calculates the two intersection points of two circles. Based on:
+ * https://gist.github.com/jupdike/bfe5eb23d1c395d8a0a1a4ddd94882ac
+ * http://math.stackexchange.com/a/1367732
+ * @returns Two coordinate pairs if there is at least one intersection, same coordinates twice if the circles touch,
+ *          empty list if there is no intersection.
+ */
+function intersectTwoCircles(x1, y1, r1, x2, y2, r2) {
+    const dx = x1 - x2;
+    const dy = y1 - y2;
+
+    const rSq = dx * dx + dy * dy;
+    var r = Math.sqrt(rSq);
+    if (!(Math.abs(r1 - r2) <= r && r <= r1 + r2)) {
+        // No intersection
+        return [];
+    }
+
+    // Intersection(s) exist
+    const a = (r1 * r1 - r2 * r2);
+    const b = a / (2 * rSq);
+    const c = Math.sqrt(2 * (r1 * r1 + r2 * r2) / rSq - (a * a) / (rSq * rSq) - 1);
+
+    var fx = (x1 + x2) / 2 + b * (x2 - x1);
+    var gx = c * (y2 - y1) / 2;
+    var ix1 = fx + gx;
+    var ix2 = fx - gx;
+
+    var fy = (y1 + y2) / 2 + b * (y2 - y1);
+    var gy = c * (x1 - x2) / 2;
+    var iy1 = fy + gy;
+    var iy2 = fy - gy;
+
+    return [[ix1, iy1], [ix2, iy2]];
 }

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import Ammo from 'ammo.js';
-import { getMousePositionAtZ, rotateTowards, moveCamera } from './Targeting.js';
-import { World, WorldState, checkLaserHit } from './GameObjects.js';
-import { SmokeLighting, Blend } from './PostProcessing.js';
-import { initHud, updateThrustBar, showGameOver, updateMaterial } from './Hud.js';
+import { getMousePositionAtZ } from './Targeting';
+import { World } from './GameObjects';
+import { SmokeLighting, Blend } from './PostProcessing';
+import { initHud } from './Hud';
+import { GameController } from './GameController';
 
 const clock = new THREE.Clock();
 
@@ -39,6 +40,8 @@ const physicsWorld = new Ammo.btDiscreteDynamicsWorld(
 physicsWorld.setGravity(new Ammo.btVector3(0, 0, 0));  // No gravity in space
 world.setPhysics(physicsWorld);
 
+const controller = new GameController(world);
+
 // === Input ===
 const keys = {};
 const mouse = {};
@@ -63,57 +66,10 @@ function animate() {
     if (mouse.x && mouse.y) {
         mouse.positionWorld = getMousePositionAtZ(renderer.domElement.getBoundingClientRect(), world.camera, mouse.x, mouse.y, 0);
     }
-    if (mouse.positionWorld) {
-        rotateTowards(world.player, mouse.positionWorld, dt);
-        moveCamera(world, mouse.positionWorld, dt);
-        world.brightStar.rotation.z = Math.atan2(world.brightStar.position.y - world.camera.position.y, world.brightStar.position.x - world.camera.position.x);
-    }
 
-    if (world.state == WorldState.Playing && keys['w']) {
-        world.player.userData.accel = world.player.userData.maxAccel;
-    } else if (world.state == WorldState.Playing && keys['s']) {
-        world.player.userData.accel = -world.player.userData.maxAccel;
-    } else {
-        world.player.userData.accel = 0;
-    }
+    controller.update(keys, mouse, dt);
 
-    world.updatePlayer(dt);
-
-    // Shoot
-    if (world.state == WorldState.Playing && mouse[0] && world.player.userData.laserHeat <= 0) {
-        const noiseRad = (2 * Math.random() - 1) * world.player.userData.laserSpreadRad;
-        world.createLaser(world.player.position, world.player.rotation.z + noiseRad);
-        world.player.userData.laserHeat = world.player.userData.laserCooldownPeriod;
-    }
-    world.player.userData.laserHeat -= dt;
-
-    // Move lasers
-    world.updateLasers(dt);
-
-    // Advance physics
-    world.physics.stepSimulation(dt, 10);
-
-    // Move asteroids
-    world.updateAsteroids(dt);
-
-    // Collide lasers with asteroids
-    world.lasers.forEach(laser => {
-        if (!laser.isRemoved) {
-            const hit = checkLaserHit(laser, world.asteroids);
-            if (hit) {
-                world.handleLaserHit(laser, hit, dt);
-            }
-        }
-    });
-
-    world.removeLasers();
-
-    world.particles.update(dt);
-
-    // Update UI
-    updateThrustBar(Math.abs(world.player.userData.speed) / world.player.userData.maxSpeed);
-    updateMaterial(world.player.userData.material);
-
+    // Render
     renderer.setRenderTarget(renderTarget);
     renderer.setClearColor(world.clearColor);
     renderer.clear();
@@ -124,10 +80,6 @@ function animate() {
 
     smokeLighting.render(renderer, world.scene, world.camera, dt);
 
-    if (world.state == WorldState.EndScreen && world.prevState == WorldState.Playing) {
-        showGameOver();
-    }
-    world.prevState = world.state;
 }
 
 animate();

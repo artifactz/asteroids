@@ -1,6 +1,10 @@
 const THRUST_NUM_SEGMENTS = 8;
 const thrustSegments = [];
 const thrustContainer = document.getElementById('thrust-bar-container');
+const gameStartContainer = document.getElementById('game-start-container');
+const gameOverContainer = document.getElementById('game-over-container');
+const materialContainer = document.getElementById('material-container');
+const materialText = document.getElementById('material-text');
 
 
 export function initHud() {
@@ -25,16 +29,24 @@ export function updateThrustBar(value) {
     });
 }
 
-
-const gameOverContainer = document.getElementById('game-over-container');
-
-export function showGameOver() {
-    gameOverContainer.style.display = "block";
-}
-
-
-const materialText = document.getElementById('material-text');
-
 export function updateMaterial(value) {
     materialText.innerHTML = value.toFixed(1);
+}
+
+export function showGameStart() {
+    gameStartContainer.classList.add("visible");
+    gameOverContainer.classList.remove("visible");
+    thrustContainer.style.display = "none";
+    materialContainer.style.display = "none";
+}
+
+export function showHud() {
+    gameStartContainer.classList.remove("visible");
+    gameOverContainer.classList.remove("visible");
+    thrustContainer.style.display = "flex";
+    materialContainer.style.display = "flex";
+}
+
+export function showGameOver() {
+    gameOverContainer.classList.add("visible");
 }
