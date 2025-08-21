@@ -2,72 +2,6 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeMeshVolume } from 'three-bvh-csg';
 
-const defaultAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, flatShading: true, depthWrite: true, onBeforeCompile: shader => { console.log(shader.vertexShader); console.log(shader.fragmentShader); } });
-// const shaderAsteroidMat = new THREE.ShaderMaterial({
-//     lights: true, // let Three.js inject light uniforms and parser hooks
-
-//     uniforms: THREE.UniformsUtils.merge([
-//         THREE.UniformsLib.common,      // pos, normal, uv, etc
-//         THREE.UniformsLib.lights,      // ambientLightColor, directionalLights, etc
-//         {                        // our edge params
-//             edgeWidth:    { value: 0.02  },
-//             edgeIntensity:{ value: 0.5   },
-//             edgeColor:    { value: new THREE.Color(0xffffff) }
-//         }
-//     ]),
-
-//     vertexShader: `
-//     #include <common>
-//     #include <lights_pars_begin>
-
-//     attribute vec3 barycentric;
-//     varying   vec3 vBarycentric;
-//     varying   vec3 vNormal;
-//     varying   vec3 vViewPosition;
-
-//     void main() {
-//       vBarycentric   = barycentric;
-//       vNormal        = normalize( normalMatrix * normal );
-//       vec4 mvPos     = modelViewMatrix * vec4( position, 1.0 );
-//       vViewPosition  = -mvPos.xyz;
-//       gl_Position    = projectionMatrix * mvPos;
-
-//       #include <lights_vertex>
-//     }`,
-
-//     fragmentShader: `
-//     #include <common>
-//     #include <bsdfs>
-//     #include <lights_pars_begin>
-
-//     uniform float edgeWidth;
-//     uniform float edgeIntensity;
-//     uniform vec3  edgeColor;
-
-//     varying vec3 vBarycentric;
-//     varying vec3 vNormal;
-//     varying vec3 vViewPosition;
-
-//     void main() {
-//       // build a simple lambertian base
-//       ReflectedLight refl;
-//       refl.directDiffuse    = vec3(0.0);
-//       refl.indirectDiffuse  = vec3(0.0);
-//       refl.directSpecular   = vec3(0.0);
-//       refl.indirectSpecular = vec3(0.0);
-
-//       #include <lights_fragment>
-
-//       vec3 lit = refl.directDiffuse + refl.indirectDiffuse;
-
-//       // edge highlight via barycentrics
-//       float d = min(min(vBarycentric.x, vBarycentric.y), vBarycentric.z);
-//       float t = smoothstep(edgeWidth, 0.0, d);
-//       lit = mix(lit, lit + edgeIntensity * edgeColor, t);
-
-//       gl_FragColor = vec4(lit, 1.0);
-//     }`
-// });
 
 const shaderAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1.0 });
 shaderAsteroidMat.onBeforeCompile = shader => {
@@ -127,7 +61,6 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
     addBarycentricCoordinates(geometry);
 
     geometry.computeBoundingSphere();
-    // const mesh = new THREE.Mesh(geometry, defaultAsteroidMat);
     const mesh = new THREE.Mesh(geometry, shaderAsteroidMat);
     const volume = computeMeshVolume(mesh);
     mesh.userData = {
