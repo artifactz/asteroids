@@ -14,16 +14,18 @@ export class GameController {
         this.prevState = null;
         this.state = GameState.StartScreen;
         this.isEaseInStage = false; // transition between StartScreen and Playing
-        this.asteroidSpawnDistance = 10;
-        this.asteroidSpawnProbabilityGainPerSecond = 0.02;
-        this.asteroidSpawnProbability = 1.0;
+        this.asteroidSpawnDistance = 32;
+        this.asteroidSpawnProbability = 10.0; // resets to 0 at every spawn
+        this.asteroidSpawnProbabilityGainPerSecond = 0.2;
 
         // Prepare start screen
         showGameStart();
         this.startScreenPlayerSpeed = startScreenPlayerSpeed;
         this.originalPlayerMaxSpeed = world.player.userData.maxSpeed;
+        this.originalPlayerMaxRotationalSpeed = world.player.userData.maxRotationalSpeed;
         world.player.userData.maxSpeed = startScreenPlayerSpeed;
         world.player.userData.speed = startScreenPlayerSpeed;
+        this.world.player.userData.maxRotationalSpeed = 0;
         world.player.rotation.z = 0.125 * Math.PI;
     }
 
@@ -33,18 +35,24 @@ export class GameController {
             this.isEaseInStage = true;
             showHud();
 
+        } else if (this.state == GameState.Playing && !this.world.player.userData.isAlive) {
+            this.state = GameState.EndScreen;
+
         } else if (this.state == GameState.Playing) {
             if (mouse.positionWorld) { rotateTowards(this.world.player, mouse.positionWorld, dt); }
 
             if (this.isEaseInStage) {
                 const decay = Math.pow(0.5, dt)
                 this.world.player.userData.speed *= decay;
-                if (this.world.player.userData.speed <= this.originalPlayerMaxSpeed) {
-                    if (this.world.player.userData.speed <= 0.5 * this.originalPlayerMaxSpeed) {
-                        this.world.player.userData.speed = 0.5 * this.originalPlayerMaxSpeed;
-                        this.world.player.userData.maxSpeed = this.originalPlayerMaxSpeed;
-                        this.isEaseInStage = false;
-                    }
+
+                const easeInEndSpeed = 0.5 * this.originalPlayerMaxSpeed;
+                const alpha = (this.world.player.userData.speed - easeInEndSpeed) / (this.startScreenPlayerSpeed - easeInEndSpeed);
+                this.world.player.userData.maxRotationalSpeed = (1 - alpha) * this.originalPlayerMaxRotationalSpeed;
+
+                if (this.world.player.userData.speed <= 0.5 * this.originalPlayerMaxSpeed) {
+                    this.world.player.userData.speed = 0.5 * this.originalPlayerMaxSpeed;
+                    this.world.player.userData.maxSpeed = this.originalPlayerMaxSpeed;
+                    this.isEaseInStage = false;
                 }
 
             } else {
@@ -56,27 +64,11 @@ export class GameController {
                     this.world.player.userData.accel = 0;
                 }
             }
-
-            if (!this.world.player.userData.isAlive) {
-                this.state = GameState.EndScreen;
-            }
         }
 
         this.world.updatePlayer(dt);
 
-        if (this.state == GameState.Playing) {
-            if (mouse.positionWorld) { moveCamera(this.world, mouse.positionWorld, dt); }
-
-            if (!this.isEaseInStage) {
-                this.asteroidSpawnProbability += this.asteroidSpawnProbabilityGainPerSecond * dt;
-                if (Math.random() < this.asteroidSpawnProbability * dt) {
-                    this.world.spawnAsteroid();
-                    this.asteroidSpawnProbability = 0;
-                }
-            }
-        } else if (this.state == GameState.StartScreen) {
-            fixCameraOnPlayer(this.world, 0, -2.5);
-        }
+        this.maybeSpawnAsteroid(dt);
 
         // Shoot
         if (this.state == GameState.Playing && mouse[0] && this.world.player.userData.laserHeat <= 0) {
@@ -85,30 +77,12 @@ export class GameController {
             this.world.player.userData.laserHeat = this.world.player.userData.laserCooldownPeriod;
         }
 
-        // Move lasers
-        this.world.updateLasers(dt);
-
-        // Advance physics
-        this.world.physics.stepSimulation(dt, 10);
-
-        // Move asteroids
+        this.world.physics.update(dt);
         this.world.updateAsteroids(dt);
-
-        this.world.updateUniverse();
-
-        // Collide lasers with asteroids
-        this.world.lasers.forEach(laser => {
-            if (!laser.isRemoved) {
-                const hit = checkLaserHit(laser, this.world.asteroids);
-                if (hit) {
-                    this.world.handleLaserHit(laser, hit, dt);
-                }
-            }
-        });
-
-        this.world.removeLasers();
-
+        this.world.updateLasers(dt);
         this.world.particles.update(dt);
+        this.updateCamera(mouse, dt);
+        this.world.updateUniverse();
 
         // Update UI
         if (this.state == GameState.Playing) {
@@ -123,5 +97,23 @@ export class GameController {
         }
 
         this.prevState = this.state;
+    }
+
+    updateCamera(mouse, dt) {
+        if (this.state == GameState.Playing && mouse.positionWorld) {
+            moveCamera(this.world, mouse.positionWorld, dt);
+        } else if (this.state == GameState.StartScreen) {
+            fixCameraOnPlayer(this.world, 0, -2.5);
+        }
+    }
+
+    maybeSpawnAsteroid(dt) {
+        if (this.state == GameState.Playing && !this.isEaseInStage) {
+            this.asteroidSpawnProbability += this.asteroidSpawnProbabilityGainPerSecond * dt;
+            if (Math.random() < this.asteroidSpawnProbability * dt) {
+                this.world.spawnAsteroid(this.asteroidSpawnDistance);
+                this.asteroidSpawnProbability = 0;
+            }
+        }
     }
 }

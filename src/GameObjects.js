@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
 import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
-import Ammo from 'ammo.js';
-import { createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
-import { Universe, UniverseLayer } from './world/Universe.js';
+import { addBarycentricCoordinates, createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
+import { Universe } from './world/Universe.js';
 import { ParticleSystem } from './Particles.js';
-import { GeometryManipulator, simplifyGeometry, iteratePoints, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
+import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
 import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
+import { applyRotation, Physics } from './Physics.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -23,9 +23,10 @@ export class World {
     constructor(depthTexture, asteroidExplosionVolume = 0.15, asteroidRemovalDistance = 60) {
         this.asteroidExplosionVolume = asteroidExplosionVolume;
         this.asteroidRemovalDistance = asteroidRemovalDistance;
+
+        this.physics = new Physics();
         this.scene = new THREE.Scene();
         this.clearColor = new THREE.Color(0x000000);
-
         this.camera = this.createCamera();
         this.addDefaultLights();
         this.universe = new Universe(this.scene, this.camera);
@@ -46,8 +47,7 @@ export class World {
                 result.geometry = new THREE.BufferGeometry();
                 result.geometry.setAttribute("position", new THREE.Float32BufferAttribute(result.vertexArray, 3));
                 result.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(result.normalArray, 3));
-                result.geometry.setIndex(new THREE.Uint16BufferAttribute(result.indexArray, 1));
-                const mesh = createAsteroid(result.geometry);
+                const mesh = this.createAsteroid(result.geometry);
 
                 // Rotation since split begin
                 const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(
@@ -58,29 +58,32 @@ export class World {
                 // Rotated offset of new center to parent center
                 const transform = rotation.clone().multiply(new THREE.Matrix4().makeTranslation(result.offset.x, result.offset.y, result.offset.z));
                 transform.decompose(mesh.position, mesh.quaternion, mesh.scale);
+                // transform.decompose(mesh.position, new THREE.Quaternion(), mesh.scale);
+                // mesh.userData.rotationalVelocity = parentAsteroid.userData.rotationalVelocity;
+                // applyRotation(mesh, parentAsteroid.userData.splitAge);
                 mesh.position.add(parentAsteroid.position);
 
                 // Velocity
                 const parentWeight = 0.95;
-                const repellingWeight = 0.1;
-                const laserWeight = 0.04;
+                const repellingWeight = 0.25;
+                const impactWeight = 0.04;
                 const repellingVector = new THREE.Vector3(
-                    Math.cos(message.data.laserRotation - sign * 0.5 * Math.PI),
-                    Math.sin(message.data.laserRotation - sign * 0.5 * Math.PI),
+                    Math.cos(message.data.impactRotation - sign * 0.5 * Math.PI),
+                    Math.sin(message.data.impactRotation - sign * 0.5 * Math.PI),
                     0
                 );
                 mesh.userData.velocity = parentAsteroid.userData.velocity.clone()
                     .multiplyScalar(parentWeight)
                     .addScaledVector(repellingVector, repellingWeight)
-                    .addScaledVector(message.data.laserDirection, laserWeight);
-                mesh.userData.velocity.z = 0.2 * -Math.sign(mesh.position.z);  // toward z=0
+                    .addScaledVector(message.data.impactDirection, impactWeight);
 
                 // Rotational velocity
                 const randomWeight = 0.1;
                 const randomRotation = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
-                const outwardWeight = 0.3;
+                const outwardWeight = 0.2;
                 const outwardRotatation = new THREE.Vector3(-rotation.elements[2], -rotation.elements[6], -rotation.elements[10]);
                 mesh.userData.rotationalVelocity = new THREE.Vector3(
+                    // TODO seeemingly results in arbitrary looking rotations (particularly for collided asteroids)
                     message.data.parentRotationalVelocityWorld.x,
                     message.data.parentRotationalVelocityWorld.y,
                     message.data.parentRotationalVelocityWorld.z
@@ -89,19 +92,18 @@ export class World {
                     .addScaledVector(randomRotation, randomWeight)
                     .addScaledVector(outwardRotatation, outwardWeight * sign);
 
-                // Move away from other asteroid part ever so slightly to avoid overlap
-                mesh.position.addScaledVector(repellingVector, 0.002);
-
-                mesh.userData.recentHit = parentAsteroid.userData.recentHit;
+                mesh.userData.recentImpact = parentAsteroid.userData.recentImpact;
+                mesh.userData.health += 0.5 * parentAsteroid.userData.health;  // health is non-positive at this point
 
                 sign *= -1;
 
-                this.scene.add(mesh);
-                this.asteroids.push(mesh);
-                console.time('addRigidBodyPhysics');
-                this.addRigidBodyPhysics(mesh, mesh.userData.volume);
-                console.timeEnd('addRigidBodyPhysics');
-
+                if (mesh.userData.volume <= this.asteroidExplosionVolume) {
+                    this.explodeAsteroid(mesh);
+                } else {
+                    this.scene.add(mesh);
+                    this.asteroids.push(mesh);
+                    this.physics.add(mesh, { mass: mesh.userData.volume }, true, 0.5);
+                }
             });
 
             // Currently not used due to ammo.js
@@ -113,6 +115,7 @@ export class World {
             this.scene.remove(parentAsteroid);
             this.asteroids = this.asteroids.filter(a => a !== parentAsteroid);
 
+            this.particles.handleDefaultSplit(parentAsteroid.userData.recentImpact, parentAsteroid, message.data.splits[0]);
         };
     }
 
@@ -142,12 +145,7 @@ export class World {
             gltf.scene.rotation.y = 0.5 * Math.PI;
             gltf.scene.scale.set(0.0667, 0.0667, 0.0667);
             player.add(gltf.scene);
-
-            if (this.shouldInitializePlayerPhysics) {
-                this.addRigidBodyPhysics(this.player, this.player.userData.mass);
-            } else {
-                this.shouldInitializePlayerPhysics = true;
-            }
+            this.physics.setPlayer(player);
         });
         player.userData = {
             maxSpeed: 8.0,
@@ -171,99 +169,17 @@ export class World {
                 player.userData.speed * Math.sin(player.rotation.z),
                 0
             ); }
-        })
+        });
+
+        player.userData.handleCollision = () => {
+            this.handlePlayerCollision();
+        }
 
         return player;
     }
 
     updatePlayer(dt) {
-        if (this.player.userData.physicsBody) {
-            // Check if a collision happened
-            const pVel = this.player.userData.physicsBody.getLinearVelocity();
-            const oVel = this.player.userData.originalVelocity;
-            if (oVel && (oVel.x() != pVel.x() || oVel.y() != pVel.y() || oVel.z() != pVel.z())) {
-                this.handlePlayerCollision();
-            }
-        }
-
-        // Handle movement at mesh level
-        this.player.userData.speed += this.player.userData.accel * dt;
-        this.player.userData.speed = Math.max(-this.player.userData.maxSpeed, Math.min(this.player.userData.speed, this.player.userData.maxSpeed));
-        this.player.position.set(
-            this.player.position.x + dt * Math.cos(this.player.rotation.z) * this.player.userData.speed,
-            this.player.position.y + dt * Math.sin(this.player.rotation.z) * this.player.userData.speed,
-            0
-        );
-
-        // Update physics state from mesh values for proper collision detection
-        if (this.player.userData.physicsBody) {
-            const transform = new Ammo.btTransform();
-            transform.setIdentity();
-            transform.setOrigin(new Ammo.btVector3(this.player.position.x, this.player.position.y, this.player.position.z));
-            const quaternion = new THREE.Quaternion().setFromEuler(this.player.rotation);
-            transform.setRotation(new Ammo.btQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w));
-            this.player.userData.physicsBody.setMotionState(new Ammo.btDefaultMotionState(transform));
-            this.player.userData.originalVelocity = new Ammo.btVector3(this.player.userData.velocity.x, this.player.userData.velocity.y, this.player.userData.velocity.z);
-            this.player.userData.physicsBody.setLinearVelocity(this.player.userData.originalVelocity);
-            this.player.userData.physicsBody.setAngularVelocity(new Ammo.btVector3(this.player.userData.rotationalVelocity.x, this.player.userData.rotationalVelocity.y, this.player.userData.rotationalVelocity.z));
-            Ammo.destroy(transform); // avoid ammo js memory leak
-        }
-
         this.player.userData.laserHeat = Math.max(0, this.player.userData.laserHeat - dt);
-    }
-
-    setPhysics(physicsWorld) {
-        this.physics = physicsWorld;
-
-        if (this.shouldInitializePlayerPhysics) {
-            this.addRigidBodyPhysics(this.player, this.player.userData.mass);
-        } else {
-            this.shouldInitializePlayerPhysics = true;
-        }
-    }
-
-    addRigidBodyPhysics(mesh, mass = 1, restitution = 1.9, friction = 0.0, rollingFriction = 0.0, dampingA = 0.0, dampingB = 0.0) {
-        const shape = new Ammo.btConvexHullShape();
-        shape.setMargin(0);
-        for (const vector of iteratePoints(mesh)) {
-            const vertex = new Ammo.btVector3(vector.x, vector.y, vector.z);
-            shape.addPoint(vertex, true);
-        }
-
-        const transform = new Ammo.btTransform();
-        transform.setIdentity();
-        transform.setOrigin(new Ammo.btVector3(mesh.position.x, mesh.position.y, mesh.position.z));
-        const quaternion = new THREE.Quaternion().setFromEuler(mesh.rotation);
-        transform.setRotation(new Ammo.btQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w));
-        const motionState = new Ammo.btDefaultMotionState(transform);
-
-        const localInertia = new Ammo.btVector3(0, 0, 0);
-        shape.calculateLocalInertia(mass, localInertia);
-
-        const rbInfo = new Ammo.btRigidBodyConstructionInfo(mass, motionState, shape, localInertia);
-        const body = new Ammo.btRigidBody(rbInfo);
-
-        body.setLinearVelocity(new Ammo.btVector3(mesh.userData.velocity.x, mesh.userData.velocity.y, mesh.userData.velocity.z));
-        body.setAngularVelocity(new Ammo.btVector3(mesh.userData.rotationalVelocity.x, mesh.userData.rotationalVelocity.y, mesh.userData.rotationalVelocity.z));
-
-        body.setActivationState(4);  // DISABLE_DEACTIVATION
-
-        body.setRestitution(restitution);
-        body.setFriction(friction);
-        body.setRollingFriction(rollingFriction);
-        body.setDamping(dampingA, dampingB);
-
-        this.physics.addRigidBody(body);
-        mesh.userData.physicsBody = body;
-    }
-
-    removeRigidBodyPhysics(mesh) {
-        const vel = mesh.userData.physicsBody.getLinearVelocity();
-        mesh.userData.velocity.set(vel.x(), vel.y(), vel.z());
-        const rotVel = mesh.userData.physicsBody.getAngularVelocity();
-        mesh.userData.rotationalVelocity.set(rotVel.x(), rotVel.y(), rotVel.z());
-        this.physics.removeRigidBody(mesh.userData.physicsBody);
-        mesh.userData.physicsBody = null;
     }
 
     createLaser(position, angle, speed, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
@@ -290,8 +206,13 @@ export class World {
         return laser;
     }
 
+    /**
+     * Spawns an asteroid such that it collides with the player orthogonally assuming constant movement.
+     * @param {*} distance Distance to player
+     * @param {*} speed Asteroid speed
+     */
     spawnAsteroid(distance = 32, speed = 1.0) {
-        const asteroid = createAsteroid(createAsteroidGeometry());
+        const asteroid = this.createAsteroid(createAsteroidGeometry());
 
         // Calculate asteroid position and velocity such that it collides with the player, assuming constant movement.
 
@@ -341,21 +262,42 @@ export class World {
         vector.sub(asteroid.position).normalize().multiplyScalar(speed);
         asteroid.userData.velocity.copy(vector);
 
-        this.addRigidBodyPhysics(asteroid, asteroid.userData.volume)
+        this.physics.add(asteroid, { mass: asteroid.userData.volume });
         this.asteroids.push(asteroid);
         this.scene.add(asteroid);
 
         console.log("Spawned asteroid distanceToPlayer=" + asteroid.position.clone().sub(this.player.position).length());
     }
 
+    createAsteroid(geometry) {
+        const asteroid = createAsteroid(geometry);
+
+        // Add collision handling
+        asteroid.userData.handleCollision = (otherMesh, contactPoint, impulse, otherImpulse) => {
+            if (otherMesh.userData.type != "asteroid") { return; }
+            if (impulse.x == 0 && impulse.y == 0 && impulse.z == 0) { return; }
+            const damage = 25 * otherMesh.userData.volume * impulse.length();
+            asteroid.userData.health -= damage;
+            // console.log("Inflicting collision damage: " + damage + " health left: " + asteroid.userData.health);
+            if (asteroid.userData.health <= 0 && !asteroid.userData.isSplitting) {
+                const impact = { point: asteroid.position.clone().addScaledVector(otherMesh.position.clone().sub(asteroid.position).normalize(), 0.5 * asteroid.userData.diameter) };
+                impact.velocity = asteroid.position.clone().sub(impact.point).normalize();
+                asteroid.userData.recentImpact = impact;
+                this.splitAsteroid(asteroid, impact);
+            }
+        };
+
+        return asteroid;
+    }
+
     /**
      * Disables collisions and enqueues a splitWorker task.
      */
-    splitAsteroid(asteroid, laser, dt) {
-        // Switch to simple physics
-        this.removeRigidBodyPhysics(asteroid);
+    splitAsteroid(asteroid, impact) {
+        // Switch to basic physics
+        this.physics.disableAmmo(asteroid);
 
-        asteroid.userData.splitAge = dt;
+        asteroid.userData.splitAge = 0;
 
         const rotVelWorld = new THREE.Vector3(asteroid.userData.rotationalVelocity.x, asteroid.userData.rotationalVelocity.y, asteroid.userData.rotationalVelocity.z);
         // const rotMat = new THREE.Matrix4().makeRotationFromEuler(asteroid.rotation);
@@ -371,12 +313,8 @@ export class World {
                 diameter: asteroid.userData.diameter,
                 vertexArray: asteroid.geometry.attributes.position.array,
                 normalArray: asteroid.geometry.attributes.normal.array,
-                indexArray: asteroid.geometry.index.array,
             },
-            laser: {
-                position: {x: laser.position.x, y: laser.position.y, z: laser.position.z},
-                velocity: {x: laser.userData.velocity.x, y: laser.userData.velocity.y, z: laser.userData.velocity.z},
-            }
+            impact
         });
     }
 
@@ -390,133 +328,96 @@ export class World {
             } else {
                 laser.position.addScaledVector(laser.userData.velocity, dt);
                 laser.userData.light.position.copy(laser.position);
+
+                const hit = checkLaserHit(laser, this.asteroids, dt);
+                if (hit) {
+                    this.handleLaserHit(laser, hit.asteroid, hit.intersection, dt);
+                }
             }
         });
-    }
 
-    removeLasers() {
         this.lasers = this.lasers.filter(l => !l.isRemoved);
     }
 
     updateAsteroids(dt) {
+        const asteroidRemovalDistanceSq = this.asteroidRemovalDistance * this.asteroidRemovalDistance;
         this.asteroids.forEach(a => {
-            if (a.userData.volume < this.asteroidExplosionVolume) {
-                // Explode asteroid and grant materials when it becomes too small
-                this.particles.handleDefaultBreakdown(a);
-                this.scene.remove(a);
-                this.physics.removeRigidBody(a.userData.physicsBody);
-                a.isRemoved = true;
-                this.player.userData.material += a.userData.materialValue * a.userData.volume;
-            } else if (a.position.clone().sub(this.player.position).length() > this.asteroidRemovalDistance) {
+            if (a.position.clone().sub(this.player.position).lengthSq() > asteroidRemovalDistanceSq) {
                 // Remove asteroid when it drifts too far
-                this.scene.remove(a);
-                this.physics.removeRigidBody(a.userData.physicsBody);
-                a.isRemoved = true;
-            } else {
-                // Move
-                if (!this.updateRigidBodyPhysics(a)) {
-                    a.position.addScaledVector(a.userData.velocity, dt);
-                    if ((a.position.z > 0 && a.userData.velocity.z > 0) || a.position.z < 0 && a.userData.velocity.z < 0) {
-                        a.position.z = 0;
-                        a.userData.velocity.z = 0;
-                    }
-                    applyRotation(a, dt);
-                }
-
-                // Currently not used due to ammo.js
-                for (const key of a.userData.asteroidCollisionHeat.keys()) {
-                    const heat = a.userData.asteroidCollisionHeat.get(key) - dt;
-                    if (heat <= 0) {
-                        a.userData.asteroidCollisionHeat.delete(key);
-                    } else {
-                        a.userData.asteroidCollisionHeat.set(key, heat);
-                    }
-                }
-
-                if (a.userData.splitAge !== null) { a.userData.splitAge += dt };
+                this.removeAsteroid(a);
+            } else if (a.userData.isSplitting) {
+                a.userData.splitAge += dt;
             }
         });
         this.asteroids = this.asteroids.filter(a => !a.isRemoved);
+    }
+
+    /**
+     * Explodes asteroid and grant the player materials.
+     */
+    explodeAsteroid(asteroid) {
+        this.player.userData.material += asteroid.userData.materialValue * asteroid.userData.volume;
+        this.particles.handleDefaultBreakdown(asteroid);
+        this.removeAsteroid(asteroid);
+    }
+
+    removeAsteroid(asteroid) {
+        this.scene.remove(asteroid);
+        this.physics.remove(asteroid);
+        asteroid.isRemoved = true;
     }
 
     updateUniverse() {
         this.universe.update(this.camera);
     }
 
-    /**
-     * Updates mesh position and orientation from its physics state. Updates physics state when passing z=0 to stay.
-     * @param {*} mesh
-     * @returns {boolean} True if mesh was updated, false if not.
-     */
-    updateRigidBodyPhysics(mesh) {
-        if (!mesh.userData.physicsBody) { return false; }
-        const ms = mesh.userData.physicsBody.getMotionState();
-        if (!ms) { return false; }
+    handleLaserHit(laser, asteroid, intersection, dt) {
+        asteroid.userData.health -= laser.userData.damage;
+        const impact = { point: intersection.point, velocity: laser.userData.velocity.clone(), normal: intersection.face.normal, farPoint: intersection.farPoint };
+        asteroid.userData.recentImpact = impact;
+        nibbleAsteroid(asteroid, impact);
 
-        const transformAux1 = new Ammo.btTransform();
-        ms.getWorldTransform(transformAux1);
-        const p = transformAux1.getOrigin();
-        const q = transformAux1.getRotation();
-
-        // Stay at z = 0
-        const vel = mesh.userData.physicsBody.getLinearVelocity();
-        if ((vel.z() < 0 && p.z() <= 0) || (vel.z() > 0 && p.z() >= 0)) {
-            p.setZ(0);
-            vel.setZ(0);
-            transformAux1.setOrigin(p);
-            mesh.userData.physicsBody.setMotionState(new Ammo.btDefaultMotionState(transformAux1));
-            mesh.userData.physicsBody.setLinearVelocity(vel);
-        }
-
-        mesh.position.set(p.x(), p.y(), p.z());
-        mesh.quaternion.set(q.x(), q.y(), q.z(), q.w());
-
-        return true;
-    }
-
-    handleLaserHit(laser, hit, dt) {
-        hit.asteroid.userData.health -= laser.userData.damage;
-        hit.intersection.impact = laser.userData.velocity.clone();
-        hit.asteroid.userData.recentHit = hit.intersection;
-        nibbleAsteroid(hit.asteroid, hit.intersection);
-
-        this.particles.handleDefaultImpact(hit.intersection, hit.asteroid);
+        this.particles.handleDefaultImpact(impact, asteroid);
         this.scene.remove(laser);
         this.scene.remove(laser.userData.light);
         laser.isRemoved = true;
 
-        if (hit.asteroid.userData.health <= 0 && hit.asteroid.userData.splitAge === null) {
-            console.time('splitParticles');
-            this.particles.handleDefaultSplit(hit.intersection, hit.asteroid);
-            console.timeEnd('splitParticles');
-            console.time('splitAsteroid');
-            this.splitAsteroid(hit.asteroid, laser, dt);
-            console.timeEnd('splitAsteroid');
+        if (asteroid.userData.health <= 0 && !asteroid.userData.isSplitting) {
+            this.splitAsteroid(asteroid, impact);
         }
     }
 
     handlePlayerCollision() {
         this.particles.handlePlayerBreakdown(this.player);
-        this.removeRigidBodyPhysics(this.player);
+        this.physics.disableAmmo(this.player);
         this.player.userData.isAlive = false;
-        this.player.userData.speed = 0.0;
-        this.player.clear();
+        this.player.userData.speed = 0;
+        this.player.userData.accel = 0;
+        this.player.clear(); // remove mesh
     }
 }
 
-export function checkLaserHit(laser, asteroids) {
+export function checkLaserHit(laser, asteroids, dt) {
     const raycaster = new THREE.Raycaster();
     raycaster.firstHitOnly = true;
 
     const dir = laser.userData.velocity.clone().normalize();
-    const origin = new THREE.Vector3().copy(laser.position).addScaledVector(dir, -0.5 * laser.userData.length);
+    const step = laser.userData.velocity.length() * dt;
+    const origin = new THREE.Vector3().copy(laser.position).addScaledVector(dir, -0.5 * laser.userData.length - step);
 
     raycaster.set(origin, dir);
-    raycaster.far = laser.userData.length;
+    raycaster.far = step + laser.userData.length;
 
     for (const asteroid of asteroids) {
         const intersects = raycaster.intersectObject(asteroid, true);
         if (intersects.length > 0) {
+            // // Determine projectile exit location
+            // const intersect = intersects[0];
+            // raycaster.set(intersect.point.clone().addScaledVector(dir, 10), dir.multiplyScalar(-1));
+            // raycaster.far = 10;
+            // const backsideIntersects = raycaster.intersectObject(asteroid, true);
+            // intersect.farPoint = backsideIntersects[0].point;
+            // return { asteroid, intersection: intersect };
             return { asteroid, intersection: intersects[0] };
         }
     }
@@ -614,16 +515,16 @@ function getApproximateCollisionPoint(meshA, meshB) {
 }
 
 
-const defaultNibbleRadius = 0.15;
-const defaultNibbleDepth = 0.05;
+const defaultNibbleRadius = 0.25;
+const defaultNibbleDepth = 0.07;
 const defaultNibbleGeometry = new THREE.IcosahedronGeometry(defaultNibbleRadius, 0);
 
-export function nibbleAsteroid(asteroid, intersection, rx = null, ry = null, rz = null) {
+export function nibbleAsteroid(asteroid, impact, rx = null, ry = null, rz = null) {
     const brush1 = new Brush(asteroid.geometry);
     const brush2 = new Brush(defaultNibbleGeometry);
-    const negativeNormalizedImpact = intersection.impact.clone().normalize().multiplyScalar(-1);
+    const negativeNormalizedImpact = impact.velocity.clone().normalize().multiplyScalar(-1);
     brush2.position.copy(asteroid.worldToLocal(
-        intersection.point.clone().add(negativeNormalizedImpact.multiplyScalar(defaultNibbleRadius - defaultNibbleDepth))
+        impact.point.clone().add(negativeNormalizedImpact.multiplyScalar(defaultNibbleRadius - defaultNibbleDepth))
     ));
     rx = rx || Math.random() * 2 * Math.PI;
     ry = ry || Math.random() * 2 * Math.PI;
@@ -651,15 +552,11 @@ export function nibbleAsteroid(asteroid, intersection, rx = null, ry = null, rz 
 
     // printDuplicateTriangles(geo);
 
+    geo = geo.toNonIndexed();
     geo.computeVertexNormals();
-    asteroid.geometry = geo;
-}
+    addBarycentricCoordinates(geo);
 
-function applyRotation(mesh, dt) {
-    const angle = mesh.userData.rotationalVelocity.length() * dt;
-    const axis = mesh.userData.rotationalVelocity.clone().normalize();
-    const deltaQuat = new THREE.Quaternion().setFromAxisAngle(axis, angle);
-    mesh.quaternion.multiplyQuaternions(deltaQuat, mesh.quaternion);
+    asteroid.geometry = geo;
 }
 
 /**

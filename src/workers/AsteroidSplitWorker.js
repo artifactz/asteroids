@@ -5,31 +5,28 @@ import { GeometryManipulator, simplifyGeometry } from '../GeometryUtils.js';
 
 
 onmessage = async (message) => {
-    const {asteroid, laser} = message.data;
+    const { asteroid, impact } = message.data;
     const result = {
         parentUuid: asteroid.uuid,
-        parentPosition: {x: asteroid.position.x, y: asteroid.position.y, z: asteroid.position.z},
-        parentRotation: {x: asteroid.rotation.x, y: asteroid.rotation.y, z: asteroid.rotation.z},
+        parentPosition: { x: asteroid.position.x, y: asteroid.position.y, z: asteroid.position.z },
+        parentRotation: { x: asteroid.rotation.x, y: asteroid.rotation.y, z: asteroid.rotation.z },
         parentRotationalVelocityWorld: asteroid.rotationalVelocityWorld,
         splits: []
     };
 
-    const laserDirection = new THREE.Vector3(laser.velocity.x, laser.velocity.y, laser.velocity.z).normalize();
+    const impactDirection = new THREE.Vector3(impact.velocity.x, impact.velocity.y, impact.velocity.z).normalize();
     const boxSize = 2.0 * asteroid.diameter;
 
     console.time('buildNoisyCutter');
     const cutterGeo = buildNoisyCutter(boxSize);
     console.timeEnd('buildNoisyCutter');
     cutterGeo.translate(0.5 * boxSize, 0.0, 0.0);
-    const laserRotation = Math.atan2(laserDirection.y, laserDirection.x);
-    cutterGeo.rotateZ(laserRotation + 0.5 * Math.PI);
+    const impactRotation = Math.atan2(impactDirection.y, impactDirection.x);
+    cutterGeo.rotateZ(impactRotation + 0.5 * Math.PI);
 
     asteroid.geometry = new THREE.BufferGeometry();
     asteroid.geometry.setAttribute("position", new THREE.Float32BufferAttribute(asteroid.vertexArray, 3));
     asteroid.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(asteroid.normalArray, 3));
-    asteroid.geometry.setIndex(new THREE.Uint16BufferAttribute(asteroid.indexArray, 1));
-    // simplifyGeometry(asteroid.geometry, 0.04);
-    // asteroid.geometry.computeVertexNormals();
 
     const brush1 = new Brush(asteroid.geometry);
     brush1.position.set(asteroid.position.x, asteroid.position.y, asteroid.position.z);
@@ -37,8 +34,8 @@ onmessage = async (message) => {
     brush1.updateMatrixWorld();
 
     const brush2 = new Brush(cutterGeo);
-    brush2.position.copy(laser.position);
-    brush2.position.addScaledVector(laserDirection, 0.5 * asteroid.diameter);
+    brush2.position.set(impact.point.x, impact.point.y, impact.point.z);
+    brush2.position.addScaledVector(impactDirection, 0.5 * asteroid.diameter);
     brush2.updateMatrixWorld();
 
     const evaluator = new Evaluator();
@@ -54,32 +51,31 @@ onmessage = async (message) => {
         // printDuplicateTriangles(brush.geometry);
 
         console.time('cleanGeo');
-        const cleanGeo = new GeometryManipulator(BufferGeometryUtils.mergeVertices(brush.geometry, 0.0001)).splitTrianglesOnTouchingVertices();
+        let geo = new GeometryManipulator(BufferGeometryUtils.mergeVertices(brush.geometry, 0.0001)).splitTrianglesOnTouchingVertices();
         console.timeEnd('cleanGeo');
-        // TODO replace with simplifyGeometry
-        const geo = BufferGeometryUtils.mergeVertices(cleanGeo, 0.01);
+        // TODO replacing with simplifyGeometry here crashes
+        geo = BufferGeometryUtils.mergeVertices(geo, 0.01);
 
         // printCollapsedTriangles(geo);
 
         geo.translate(-asteroid.position.x, -asteroid.position.y, -asteroid.position.z);
+        geo.setIndex(new GeometryManipulator(geo).removeCollapsedTriangles());
         geo.computeBoundingBox();
         const offset = geo.boundingBox.getCenter(new THREE.Vector3());
         geo.translate(-offset.x, -offset.y, -offset.z);
 
-        geo.setIndex(new GeometryManipulator(geo).removeCollapsedTriangles());
+        geo = geo.toNonIndexed();
         geo.computeVertexNormals();
 
         result.splits.push({
             offset: {x: offset.x, y: offset.y, z: offset.z},
             vertexArray: geo.attributes.position.array,
             normalArray: geo.attributes.normal.array,
-            indexArray: geo.index.array,
         });
-
     });
 
-    result.laserDirection = {x: laserDirection.x, y: laserDirection.y, z: laserDirection.z};
-    result.laserRotation = laserRotation;
+    result.impactDirection = { x: impactDirection.x, y: impactDirection.y, z: impactDirection.z };
+    result.impactRotation = impactRotation;
 
     // await new Promise(r => setTimeout(r, 1000));
     postMessage(result);
@@ -108,9 +104,13 @@ function buildNoisyCutter(boxSize, resolution = 15, amplitude = 0.1) {
     return merged
 }
 
-function createCrackPlane(width = 1.0, height = 1.0, segments = 20, amplitude = 0.1) {
+function createCrackPlane(width = 1.0, height = 1.0, segments = 20) {
     const plane = new THREE.PlaneGeometry(width, height, segments, segments);
     const pos = plane.attributes.position;
+
+    const noiseX = 0.5 * width / segments;
+    const noiseY = 0.5 * width / segments;
+    const noiseZ = 0.5 * Math.max(width, height) / segments;
 
     for (let i = 0; i < pos.count; i++) {
         const x = pos.getX(i);
@@ -121,9 +121,9 @@ function createCrackPlane(width = 1.0, height = 1.0, segments = 20, amplitude = 
             continue;
         }
 
-        const noise = amplitude * (Math.random() - 0.5);
-
-        pos.setZ(i, noise); // displace along Z-axis
+        pos.setX(i, x + noiseX * (Math.random() - 0.5));
+        pos.setY(i, y + noiseY * (Math.random() - 0.5));
+        pos.setZ(i, noiseZ * (Math.random() - 0.5));
     }
 
     plane.computeVertexNormals();

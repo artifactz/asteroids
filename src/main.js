@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import Ammo from 'ammo.js';
 import { getMousePositionAtZ } from './Targeting';
 import { World } from './GameObjects';
 import { SmokeLighting, Blend } from './PostProcessing';
@@ -29,16 +28,6 @@ const world = new World(renderTarget.depthTexture);
 
 const blend = new Blend(THREE.NormalBlending);
 const smokeLighting = new SmokeLighting();
-
-const collisionConfig = new Ammo.btDefaultCollisionConfiguration();
-const physicsWorld = new Ammo.btDiscreteDynamicsWorld(
-    new Ammo.btCollisionDispatcher(collisionConfig),
-    new Ammo.btDbvtBroadphase(),
-    new Ammo.btSequentialImpulseConstraintSolver(),
-    collisionConfig
-);
-physicsWorld.setGravity(new Ammo.btVector3(0, 0, 0));  // No gravity in space
-world.setPhysics(physicsWorld);
 
 const controller = new GameController(world);
 
