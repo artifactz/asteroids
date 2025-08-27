@@ -5,6 +5,7 @@ const gameStartContainer = document.getElementById('game-start-container');
 const gameOverContainer = document.getElementById('game-over-container');
 const materialContainer = document.getElementById('material-container');
 const materialText = document.getElementById('material-text');
+const fpsText = document.getElementById('fps-text');
 
 
 export function initHud() {
@@ -31,6 +32,10 @@ export function updateThrustBar(value) {
 
 export function updateMaterial(value) {
     materialText.innerHTML = value.toFixed(1);
+}
+
+export function updateFps(value) {
+    fpsText.innerHTML = value.toFixed(1);
 }
 
 export function showGameStart() {

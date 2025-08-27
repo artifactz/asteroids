@@ -2,10 +2,29 @@ import * as THREE from 'three';
 import { getMousePositionAtZ } from './Targeting';
 import { World } from './GameObjects';
 import { SmokeLighting, Blend } from './PostProcessing';
-import { initHud } from './Hud';
+import { initHud, updateFps } from './Hud';
 import { GameController } from './GameController';
 
+
 const clock = new THREE.Clock();
+
+/** Calculates and displays FPS. */
+const fps = {
+    flushInterval: 1,
+    lastFlushAge: 0,
+    deltas: [],
+    update(dt) {
+        if (!dt) { return; }
+        this.deltas.push(dt);
+        this.lastFlushAge += dt;
+        if (this.lastFlushAge >= this.flushInterval) {
+            const avgDelta = this.deltas.reduce((a, b) => a + b, 0) / this.deltas.length;
+            updateFps(1 / avgDelta);
+            this.deltas = [];
+            this.lastFlushAge = 0;
+        }
+    }
+}
 
 const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three-canvas') }); // { antialias: true }
 renderer.autoClear = false;
@@ -53,6 +72,7 @@ window.addEventListener('resize', () => {
 function animate() {
     requestAnimationFrame(animate);
     const dt = clock.getDelta();
+    fps.update(dt);
 
     if (mouse.x && mouse.y) {
         mouse.positionWorld = getMousePositionAtZ(renderer.domElement.getBoundingClientRect(), world.camera, mouse.x, mouse.y, 0);
