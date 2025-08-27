@@ -306,7 +306,7 @@ export class ParticleSystem {
     }
 
     addLight(position, velocity, lifetime, fadeoutTime) {
-        const light = new THREE.PointLight(0xffcc66, 1, 20);
+        const light = new THREE.PointLight(0xffcc66, 1, 5);
         light.position.copy(position);
         light.userData = { velocity, lifetime, fadeoutTime, age: 0 };
         this.scene.add(light);
@@ -415,6 +415,18 @@ function generateImpactDebris(position, direction, count, randomSpeed = 0.1) {
     return { positions, velocities };
 }
 
+/**
+ * Returns positions and velocities for particles that appear when an asteroid splits.
+ * @param {Array} positionPool Positions to sample from. Throws an error if empty.
+ * @param {THREE.Vector3} baseVelocity 
+ * @param {Object} impact Impact object with a point and a velocity.
+ * @param {number} count Number of positions and velocities to generate.
+ * @param {number} outwardSpeed Speed away from center (of positionPool).
+ * @param {number} randomSpeed Velocity randomization multiplier.
+ * @param {number} impactWeight Multiplier for the acceleration of particles near the impact line in impact direction.
+ * @param {number} impactFalloff Impact line acceleration falloff. Lower values mean a broader neighborhood is affected.
+ * @returns Object with positions and velocities.
+ */
 function generateSplitDebris(positionPool, baseVelocity, impact, count, outwardSpeed = 0.1, randomSpeed = 0.1, impactWeight = 0.1, impactFalloff = 100) {
     const positions = [];
     const velocities = [];

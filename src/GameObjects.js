@@ -118,7 +118,7 @@ export class World {
         laser.userData.ttl = ttl;
         laser.userData.damage = damage;
 
-        const light = new THREE.PointLight(0xff6666, 1, 20, 1.25);
+        const light = new THREE.PointLight(0xff6666, 1, 10, 1.25);
         light.position.copy(laser.position);
         laser.userData.light = light;
 
@@ -285,6 +285,7 @@ export class World {
     }
 
     removeAsteroid(asteroid) {
+        if (asteroid.isRemoved) { return; }
         this.scene.remove(asteroid);
         this.physics.remove(asteroid);
         asteroid.isRemoved = true;
@@ -421,95 +422,6 @@ export function checkLaserHit(laser, asteroids, dt) {
     }
 
     return null;
-}
-
-/**
- * Currently not used due to ammo.js
- */
-export function checkAsteroidCollision(meshA, meshB) {
-    // Broad phase: bounding spheres
-    const sphereA = new THREE.Sphere();
-    const sphereB = new THREE.Sphere();
-    meshA.geometry.computeBoundingSphere();
-    meshB.geometry.computeBoundingSphere();
-    sphereA.copy(meshA.geometry.boundingSphere).applyMatrix4(meshA.matrixWorld);
-    sphereB.copy(meshB.geometry.boundingSphere).applyMatrix4(meshB.matrixWorld);
-
-    if (!sphereA.intersectsSphere(sphereB)) return false;
-
-    // Narrow phase: BVH intersection test
-    if (!meshA.geometry.boundsTree) { meshA.geometry.computeBoundsTree(); }
-    if (!meshB.geometry.boundsTree) { meshB.geometry.computeBoundsTree(); }
-
-    const transform = new THREE.Matrix4().copy(meshA.matrixWorld).invert().multiply(meshB.matrixWorld);
-    const collided = meshA.geometry.boundsTree.intersectsGeometry(meshB.geometry, transform);
-
-    console.log(`collided: ${collided}`);
-
-    return collided;
-}
-
-/**
- * Currently not used due to ammo.js
- */
-export function handleAsteroidCollision(meshA, meshB) {
-    const point = getApproximateCollisionPoint(meshA, meshB);
-
-    const normal = meshA.position.clone().sub(meshB.position).normalize();
-
-    // Relative velocity at contact point
-    const relVel = meshA.userData.velocity.clone().sub(meshB.userData.velocity);
-
-    // Project relative velocity onto normal
-    const sepVel = relVel.dot(normal);
-    if (sepVel > 0) return; // Already moving apart
-
-    const restitution = 1.0; // Perfectly elastic
-    const impulseMag = -(1 + restitution) * sepVel / 2;
-
-    const impulse = normal.clone().multiplyScalar(impulseMag);
-
-    meshA.userData.velocity.add(impulse);
-    meshB.userData.velocity.sub(impulse);
-
-    // === Angular velocity update ===
-
-    // r = contact point relative to center of mass
-    const rA = point.clone().sub(meshA.position);
-    const rB = point.clone().sub(meshB.position);
-
-    // TODO revise
-
-    const torqueA = new THREE.Vector3().copy(rA).cross(impulse);
-    const torqueB = new THREE.Vector3().copy(rB).cross(impulse).negate();
-
-    // Scale torque arbitrarily for effect (not physically accurate)
-    const spinScale = 0.05;
-    meshA.userData.rotationalVelocity.add(torqueA.multiplyScalar(spinScale));
-    meshB.userData.rotationalVelocity.add(torqueB.multiplyScalar(spinScale));
-
-    meshA.userData.asteroidCollisionHeat.set(meshB, meshA.userData.asteroidCollisionCooldownPeriod);
-    meshB.userData.asteroidCollisionHeat.set(meshA, meshB.userData.asteroidCollisionCooldownPeriod);
-}
-
-function getApproximateCollisionPoint(meshA, meshB) {
-    const target1 = {};
-    const target2 = {};
-
-    const aInvRot = new THREE.Euler(-meshA.rotation.x, -meshA.rotation.y, -meshA.rotation.z, "ZYX");
-    const aInvMatWorld = new THREE.Matrix4().makeTranslation(meshA.position.clone().multiplyScalar(-1));
-    aInvMatWorld.multiply(new THREE.Matrix4().makeRotationFromEuler(aInvRot));
-    const transform = new THREE.Matrix4().copy(aInvMatWorld).multiply(meshB.matrixWorld);
-
-    // Get closest point from meshA to meshB
-    meshA.geometry.boundsTree.closestPointToGeometry(
-        meshB.geometry,
-        transform,
-        target1,
-        target2
-    );
-    const collisionPoint = meshA.localToWorld(target1.point.clone()).add(meshB.localToWorld(target2.point.clone())).multiplyScalar(0.5);
-    return collisionPoint;
 }
 
 

@@ -72,8 +72,6 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
         ),
         diameter: 2 * geometry.boundingSphere.radius,
         volume: volume,
-        asteroidCollisionCooldownPeriod: 0.1,
-        asteroidCollisionHeat: new Map(),
         health: 30 * Math.sqrt(volume) + randomHealth * Math.random(),
         materialValue: 2.5,
         splitAge: null,
