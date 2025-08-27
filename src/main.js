@@ -45,6 +45,8 @@ window.addEventListener('resize', () => {
     world.camera.aspect = window.innerWidth / window.innerHeight;
     world.camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderTarget.setSize(window.innerWidth, window.innerHeight);
+    smokeLighting.setSize(window.innerWidth, window.innerHeight);
 });
 
 // === Game Loop ===

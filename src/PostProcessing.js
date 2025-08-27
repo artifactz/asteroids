@@ -130,6 +130,11 @@ export class SmokeLighting {
         this.smokeLightingMaterial.uniforms.lightColors.value = lightColors;
         this.smokeLightingMaterial.uniforms.lightIntensities.value = lightIntensities;
     }
+
+    setSize(width, height) {
+        this.ping.setSize(width, height);
+        this.pong.setSize(width, height);
+    }
 }
 
 
