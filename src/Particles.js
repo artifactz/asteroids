@@ -125,14 +125,20 @@ export class ParticleSystem {
         const planeNormal = new THREE.Vector3(impact.velocity.y, -impact.velocity.x, 0).normalize();  // rotate impact 90° ccw
         const pos = splitAsteroid.geometry.attributes.position;
         for (let i = 0; i < pos.count; i++) {
-            const p = asteroid.localToWorld(new THREE.Vector3().fromBufferAttribute(pos, i));
+            const p = splitAsteroid.localToWorld(new THREE.Vector3().fromBufferAttribute(pos, i));
             const v = p.clone().sub(planeOrigin);
             const dist = v.dot(planeNormal);
-            if (dist > minPlaneDistance) { continue; }
+            if (Math.abs(dist) > minPlaneDistance) { continue; }
             const projectedPoint = p.clone().sub(planeNormal.clone().multiplyScalar(dist));
             if (!isPointWithinDistanceOfPoints(projectedPoint, projectedPoints, minPointDistance)) {
                 projectedPoints.push(projectedPoint);
             }
+        }
+
+        if (projectedPoints.length == 0) {
+            // TODO: splitAsteroid might have moved too far away from impact point at this time. maybe solve when adding smoke spawners.
+            console.log("Skipping split particles.");
+            return;
         }
 
         // Smoke
