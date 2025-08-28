@@ -1,13 +1,11 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
 import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
-import { addBarycentricCoordinates, createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
+import { createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
 import { Universe } from './world/Universe.js';
 import { ParticleSystem } from './Particles.js';
-import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from './GeometryUtils.js';
 import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
-import { applyRotation, Physics } from './Physics.js';
+import { Physics } from './Physics.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -103,30 +101,6 @@ export class World {
 
     updatePlayer(dt) {
         this.player.userData.laserHeat = Math.max(0, this.player.userData.laserHeat - dt);
-    }
-
-    createLaser(position, angle, speed, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
-        const geo = new THREE.CylinderGeometry(radius, radius, length);
-        geo.rotateZ(Math.PI / 2);
-        const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-        const laser = new THREE.Mesh(geo, mat);
-        laser.rotation.z = angle;
-        laser.position.set(position.x, position.y, 0);
-        laser.userData.velocity = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(speed);
-        laser.userData.length = length;
-        laser.userData.radius = radius;
-        laser.userData.ttl = ttl;
-        laser.userData.damage = damage;
-
-        const light = new THREE.PointLight(0xff6666, 1, 10, 1.25);
-        light.position.copy(laser.position);
-        laser.userData.light = light;
-
-        this.lasers.push(laser);
-        this.scene.add(light);
-        this.scene.add(laser);
-
-        return laser;
     }
 
     /**
@@ -241,27 +215,6 @@ export class World {
         });
     }
 
-    updateLasers(dt) {
-        this.lasers.forEach(laser => {
-            laser.userData.ttl -= dt;
-            if (laser.userData.ttl <= 0) {
-                this.scene.remove(laser);
-                this.scene.remove(laser.userData.light);
-                laser.isRemoved = true;
-            } else {
-                laser.position.addScaledVector(laser.userData.velocity, dt);
-                laser.userData.light.position.copy(laser.position);
-
-                const hit = checkLaserHit(laser, this.asteroids, dt);
-                if (hit) {
-                    this.handleLaserHit(laser, hit.asteroid, hit.intersection, dt);
-                }
-            }
-        });
-
-        this.lasers = this.lasers.filter(l => !l.isRemoved);
-    }
-
     updateAsteroids(dt) {
         const asteroidRemovalDistanceSq = this.asteroidRemovalDistance * this.asteroidRemovalDistance;
         this.asteroids.forEach(a => {
@@ -295,16 +248,64 @@ export class World {
         this.universe.update(this.camera);
     }
 
-    handleLaserHit(laser, asteroid, intersection, dt) {
-        asteroid.userData.health -= laser.userData.damage;
-        const impact = { point: intersection.point, velocity: laser.userData.velocity.clone(), normal: intersection.face.normal, farPoint: intersection.farPoint };
-        asteroid.userData.recentImpact = impact;
-        nibbleAsteroid(asteroid, impact);
+    createLaser(position, angle, speed, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
+        const geo = new THREE.CylinderGeometry(radius, radius, length);
+        geo.rotateZ(Math.PI / 2);
+        const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const laser = new THREE.Mesh(geo, mat);
+        laser.rotation.z = angle;
+        laser.position.set(position.x, position.y, 0);
+        laser.userData.velocity = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0).multiplyScalar(speed);
+        laser.userData.length = length;
+        laser.userData.radius = radius;
+        laser.userData.ttl = ttl;
+        laser.userData.damage = damage;
 
-        this.particles.handleDefaultImpact(impact, asteroid);
+        const light = new THREE.PointLight(0xff6666, 1, 10, 1.25);
+        light.position.copy(laser.position);
+        laser.userData.light = light;
+
+        this.lasers.push(laser);
+        this.scene.add(light);
+        this.scene.add(laser);
+
+        return laser;
+    }
+
+    updateLasers(dt) {
+        this.lasers.forEach(laser => {
+            laser.userData.ttl -= dt;
+            if (laser.userData.ttl <= 0) {
+                this.removeLaser(laser);
+            } else {
+                laser.position.addScaledVector(laser.userData.velocity, dt);
+                laser.userData.light.position.copy(laser.position);
+
+                const hit = checkLaserHit(laser, this.asteroids, dt);
+                if (hit) {
+                    this.handleLaserHit(laser, hit.asteroid, hit.intersection);
+                }
+            }
+        });
+
+        this.lasers = this.lasers.filter(l => !l.isRemoved);
+    }
+
+    removeLaser(laser) {
+        if (laser.isRemoved) { return; }
         this.scene.remove(laser);
         this.scene.remove(laser.userData.light);
         laser.isRemoved = true;
+    }
+
+    handleLaserHit(laser, asteroid, intersection) {
+        asteroid.userData.health -= laser.userData.damage;
+        const impact = { point: intersection.point, velocity: laser.userData.velocity.clone(), normal: intersection.face.normal, farPoint: intersection.farPoint };
+        asteroid.userData.recentImpact = impact;
+        asteroid.userData.nibble(impact);
+
+        this.particles.handleDefaultImpact(impact, asteroid);
+        this.removeLaser(laser);
 
         if (asteroid.userData.health <= 0 && !asteroid.userData.isSplitting) {
             this.splitAsteroid(asteroid, impact);
@@ -341,9 +342,6 @@ export class World {
             // Rotated offset of new center to parent center
             const transform = rotation.clone().multiply(new THREE.Matrix4().makeTranslation(result.offset.x, result.offset.y, result.offset.z));
             transform.decompose(mesh.position, mesh.quaternion, mesh.scale);
-            // transform.decompose(mesh.position, new THREE.Quaternion(), mesh.scale);
-            // mesh.userData.rotationalVelocity = parentAsteroid.userData.rotationalVelocity;
-            // applyRotation(mesh, parentAsteroid.userData.splitAge);
             mesh.position.add(parentAsteroid.position);
 
             // Velocity
@@ -422,51 +420,6 @@ export function checkLaserHit(laser, asteroids, dt) {
     }
 
     return null;
-}
-
-
-const defaultNibbleRadius = 0.25;
-const defaultNibbleDepth = 0.07;
-const defaultNibbleGeometry = new THREE.IcosahedronGeometry(defaultNibbleRadius, 0);
-
-export function nibbleAsteroid(asteroid, impact, rx = null, ry = null, rz = null) {
-    const brush1 = new Brush(asteroid.geometry);
-    const brush2 = new Brush(defaultNibbleGeometry);
-    const negativeNormalizedImpact = impact.velocity.clone().normalize().multiplyScalar(-1);
-    brush2.position.copy(asteroid.worldToLocal(
-        impact.point.clone().add(negativeNormalizedImpact.multiplyScalar(defaultNibbleRadius - defaultNibbleDepth))
-    ));
-    rx = rx || Math.random() * 2 * Math.PI;
-    ry = ry || Math.random() * 2 * Math.PI;
-    rz = rz || Math.random() * 2 * Math.PI;
-
-    brush2.rotation.set(rx, ry, rz);
-    brush2.updateMatrixWorld();
-
-    const evaluator = new Evaluator();
-    evaluator.attributes = ["position"];
-    const result = evaluator.evaluate(brush1, brush2, SUBTRACTION);
-    let geo = result.geometry;
-
-    // printDuplicateTriangles(geo);
-
-    simplifyGeometry(geo, 0.0001);
-
-    // printDuplicateTriangles(geo);
-
-    geo = new GeometryManipulator(geo).splitTrianglesOnTouchingVertices();
-
-    // printDuplicateTriangles(geo);  // <-- TODO this happens
-
-    simplifyGeometry(geo, 0.04);
-
-    // printDuplicateTriangles(geo);
-
-    geo = geo.toNonIndexed();
-    geo.computeVertexNormals();
-    addBarycentricCoordinates(geo);
-
-    asteroid.geometry = geo;
 }
 
 /**

@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeMeshVolume } from 'three-bvh-csg';
+import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
+import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from '../GeometryUtils.js';
 
 
 const shaderAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1.0 });
@@ -75,7 +77,9 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
         health: 30 * Math.sqrt(volume) + randomHealth * Math.random(),
         materialValue: 2.5,
         splitAge: null,
-        type: "asteroid"
+        type: "asteroid",
+
+        nibble(impact) { nibbleAsteroid(mesh, impact); }
     };
 
     Object.defineProperty(mesh.userData, "isSplitting", { get: function () { return mesh.userData.splitAge !== null; } });
@@ -86,11 +90,62 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
 /**
  * Generates barycentric coords for every triangle.
  */
-export function addBarycentricCoordinates(geometry) {
+function addBarycentricCoordinates(geometry) {
     const count = geometry.attributes.position.count;  // vertex count
     const bary = new Float32Array(count * 3);
     for (let i = 0; i < count; i += 3) {
         bary.set([1,0,0,  0,1,0,  0,0,1], i * 3);
     }
     geometry.setAttribute('barycentric', new THREE.BufferAttribute(bary, 3));
+}
+
+
+const nibbleRadius = 0.25;
+const nibbleDepth = 0.07;
+const nibbleGeometry = new THREE.IcosahedronGeometry(nibbleRadius, 0);
+const nibbleBrush = new Brush(nibbleGeometry);
+const nibbleEvaluator = new Evaluator();
+nibbleEvaluator.attributes = ["position"];
+
+/**
+ * Subtracts a low-detail sphere from the geometry around the impact area.
+ * @param {THREE.Mesh} asteroid 
+ * @param {Object} impact Impact object with a point and a velocity.
+ */
+function nibbleAsteroid(asteroid, impact, rx = null, ry = null, rz = null) {
+    const brush1 = new Brush(asteroid.geometry);
+    // const brush2 = new Brush(defaultNibbleGeometry);
+    const negativeNormalizedImpact = impact.velocity.clone().normalize().multiplyScalar(-1);
+    nibbleBrush.position.copy(asteroid.worldToLocal(
+        impact.point.clone().add(negativeNormalizedImpact.multiplyScalar(nibbleRadius - nibbleDepth))
+    ));
+    rx = rx || Math.random() * 2 * Math.PI;
+    ry = ry || Math.random() * 2 * Math.PI;
+    rz = rz || Math.random() * 2 * Math.PI;
+
+    nibbleBrush.rotation.set(rx, ry, rz);
+    nibbleBrush.updateMatrixWorld();
+
+    const result = nibbleEvaluator.evaluate(brush1, nibbleBrush, SUBTRACTION);
+    let geo = result.geometry;
+
+    // printDuplicateTriangles(geo);
+
+    simplifyGeometry(geo, 0.0001);
+
+    // printDuplicateTriangles(geo);
+
+    geo = new GeometryManipulator(geo).splitTrianglesOnTouchingVertices();
+
+    // printDuplicateTriangles(geo);  // <-- TODO this happens
+
+    simplifyGeometry(geo, 0.04);
+
+    // printDuplicateTriangles(geo);
+
+    geo = geo.toNonIndexed();
+    geo.computeVertexNormals();
+    addBarycentricCoordinates(geo);
+
+    asteroid.geometry = geo;
 }
