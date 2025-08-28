@@ -61,14 +61,7 @@ export class Physics {
     enableAmmo(mesh, { mass = 1, restitution = 0.999, friction = 0, rollingFriction = 0, dampingA = 0, dampingB = 0, group = 1, mask = 1 } = {}) {
         console.time('enableAmmo');
 
-        const shape = new Ammo.btConvexHullShape();
-        shape.setMargin(0);
-        for (const vector of iteratePoints(mesh)) {
-            const vertex = new Ammo.btVector3(vector.x, vector.y, vector.z);
-            shape.addPoint(vertex, true);
-            Ammo.destroy(vertex);
-        }
-
+        const shape = shapeFromMesh(mesh);
         const transform = new Ammo.btTransform();
         transform.setIdentity();
         transform.setOrigin(new Ammo.btVector3(mesh.position.x, mesh.position.y, mesh.position.z));
@@ -184,7 +177,7 @@ export class Physics {
     }
 
     /**
-     * Updates mesh position and orientation from its physics state. Updates physics state when passing z=0 to snap.
+     * Updates mesh position and orientation from its physics state. Updates physics state to steer toward z=0.
      * @param {*} mesh
      * @returns {boolean} True if mesh was updated, false if not.
      */
@@ -218,6 +211,7 @@ export class Physics {
             const controlP = 1, controlD = 0.5;
             vel.setZ(vel.z() - (controlP * p.z() + controlD * vel.z()) * dt);
             body.setLinearVelocity(vel);
+            Ammo.destroy(vel);
         }
 
         mesh.position.set(p.x(), p.y(), p.z());
@@ -274,9 +268,36 @@ export class Physics {
     }
 }
 
-export function applyRotation(mesh, dt) {
+function applyRotation(mesh, dt) {
     const angle = mesh.userData.rotationalVelocity.length() * dt;
     const axis = mesh.userData.rotationalVelocity.clone().normalize();
     const deltaQuat = new THREE.Quaternion().setFromAxisAngle(axis, angle);
     mesh.quaternion.multiplyQuaternions(deltaQuat, mesh.quaternion);
+}
+
+/**
+ * Generates an ammo.js shape from a THREE.js mesh.
+ * @param {THREE.Mesh} mesh 
+ * @returns {Ammo.btConvexHullShape}
+ */
+function shapeFromMesh(mesh) {
+    const shape = new Ammo.btConvexHullShape();
+    shape.setMargin(0);
+
+    let vertex = null;
+    for (const vector of iteratePoints(mesh)) {
+        if (vertex) {
+            // Add point but skip "recalculateLocalAabb"
+            shape.addPoint(vertex, false);
+        } else {
+            vertex = new Ammo.btVector3();
+        }
+        vertex.setValue(vector.x, vector.y, vector.z);
+    }
+
+    // Add last point and do the heavy "recalculateLocalAabb" calculation finalize the shape
+    shape.addPoint(vertex, true);
+    Ammo.destroy(vertex);
+
+    return shape;
 }
