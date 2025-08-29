@@ -4,7 +4,8 @@ import * as THREE from 'three';
  * Estimates 2d lighting of a scene layer by adding the light color to nearby pixels.
  */
 export class SmokeLighting {
-    constructor() {
+    constructor(maxLights = 16) {
+        this.maxLights = maxLights;
         this.ping = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
             format: THREE.RGBAFormat,
             type: THREE.UnsignedByteType,
@@ -40,9 +41,9 @@ export class SmokeLighting {
             fragmentShader: `
                 uniform sampler2D tSmoke;
                 uniform vec2 resolution;
-                uniform vec2 lights[10]; // max 10 lights
-                uniform vec3 lightColors[10];
-                uniform float lightIntensities[10];
+                uniform vec2 lights[${maxLights}];
+                uniform vec3 lightColors[${maxLights}];
+                uniform float lightIntensities[${maxLights}];
                 uniform int numLights;
 
                 varying vec2 vUv;
@@ -52,7 +53,7 @@ export class SmokeLighting {
                     if (smoke.a == 0.0) { discard; }
                     vec3 litColor = smoke.rgb;
 
-                    for (int i = 0; i < 10; i++) {
+                    for (int i = 0; i < ${maxLights}; i++) {
                         if (i >= numLights) break;
 
                         vec2 lightUV = lights[i];
@@ -97,12 +98,11 @@ export class SmokeLighting {
      * Sets shader uniforms from PointLights in scene.
      */
     updateLights(scene, camera) {
-        const screenPositions = [];
-        const lightColors = [];
-        const lightIntensities = [];
+        let lights = [];
         for (const element of scene.children) {
             if (element instanceof THREE.PointLight) {
                 const light = element;
+
                 // Convert light position to screen coordinates
                 const vector = new THREE.Vector3();
                 vector.setFromMatrixPosition(light.matrixWorld);
@@ -112,23 +112,35 @@ export class SmokeLighting {
                 vector.x = (vector.x + 1) / 2;
                 vector.y = (vector.y + 1) / 2;
 
-                screenPositions.push(new THREE.Vector2(vector.x, vector.y));
-                lightColors.push(light.color.clone());
-                lightIntensities.push(light.intensity);
+                lights.push({
+                    position: new THREE.Vector2(vector.x, vector.y),
+                    color: light.color,
+                    intensity: light.intensity
+                });
             }
         }
 
-        this.smokeLightingMaterial.uniforms.numLights.value = screenPositions.length;
-
-        for (; screenPositions.length < 10; ) {
-            screenPositions.push(new THREE.Vector2());
-            lightColors.push(new THREE.Color(0, 0, 0));
-            lightIntensities.push(0);
+        if (lights.length > this.maxLights) {
+            // Keep lights close to screen center
+            lights = lights.sort((a, b) => {
+                return a.position.x * a.position.x + a.position.y * a.position.y - b.position.x * b.position.x + b.position.y * b.position.y
+            }).slice(0, this.maxLights);
         }
 
-        this.smokeLightingMaterial.uniforms.lights.value = screenPositions;
-        this.smokeLightingMaterial.uniforms.lightColors.value = lightColors;
-        this.smokeLightingMaterial.uniforms.lightIntensities.value = lightIntensities;
+        this.smokeLightingMaterial.uniforms.numLights.value = lights.length;
+
+        // Fill unused slots with zeros
+        for (; lights.length < this.maxLights; ) {
+            lights.push({
+                position: new THREE.Vector2(),
+                color: new THREE.Color(0, 0, 0),
+                intensity: 0
+            });
+        }
+
+        this.smokeLightingMaterial.uniforms.lights.value = lights.map((light) => light.position);
+        this.smokeLightingMaterial.uniforms.lightColors.value = lights.map((light) => light.color);
+        this.smokeLightingMaterial.uniforms.lightIntensities.value = lights.map((light) => light.intensity);
     }
 
     setSize(width, height) {
