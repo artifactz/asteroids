@@ -83,7 +83,7 @@ export class ParticleSystem {
         });
     }
 
-    handleDefaultImpact(impact, asteroid, divertAngle = 0.3 * Math.PI, minLifetime = 0.333, maxLifetime = 1.0, minFadeoutRatio = 0.333, maxFadeoutRatio = 1.0) {
+    handleLaserAsteroidImpact(impact, asteroid, divertAngle = 0.3 * Math.PI, minLifetime = 0.333, maxLifetime = 1.0, minFadeoutRatio = 0.333, maxFadeoutRatio = 1.0) {
         // Sparks
         const reflection = reflect(impact.normal, impact.velocity);
         const noisyReflection = randomWiggleVector3(reflection, divertAngle);
@@ -111,11 +111,11 @@ export class ParticleSystem {
 
         // Smoke
         const smoke = generateImpactDebris(impact.point, generalDirection, 10, 0.3);
-        const lifetime = 7.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 79.0, 0.25, 0.7, this.smokeTexture, THREE.NormalBlending, 0.25, 1);
+        const lifetime = 5.0 + (2 * Math.random() - 1);
+        this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 60.0, 0.25, 0.7, this.smokeTexture, THREE.NormalBlending, 0.25, 1);
     }
 
-    handleDefaultSplit(impact, asteroid, splitAsteroid) {
+    handleAsteroidSplit(impact, asteroid, splitAsteroid) {
         // Prepare spawn points
         const minPointDistance = 0.025;
         const minPlaneDistance = 0.1;
@@ -141,15 +141,18 @@ export class ParticleSystem {
             return;
         }
 
+        const diameter = getMaxPairDistance(projectedPoints);
+
         // Smoke
-        const numSmokeParticles = Math.ceil(25 * asteroid.userData.diameter);
+        const numSmokeParticles = Math.ceil(35 * diameter * diameter);
         const smokeBaseVelocity = asteroid.userData.velocity.clone().multiplyScalar(0.9);
+        smokeBaseVelocity.z += 0.5; // looks better
         let { positions, velocities } = generateSplitDebris(projectedPoints, smokeBaseVelocity, impact, numSmokeParticles, 0.1, 0.14, 0.02);
         const smokeLifetime = 7.0 + (2 * Math.random() - 1);
-        this.addTextureParticleChunk(positions, velocities, smokeLifetime, 70.0, 0.3, 1, this.smokeTexture, THREE.NormalBlending, 0.25, 1);
+        this.addTextureParticleChunk(positions, velocities, smokeLifetime, 60.0, 0.3, 1, this.smokeTexture, THREE.NormalBlending, 0.25, 1);
 
         // Slow debris
-        const numDebrisParticles = Math.ceil(64 * asteroid.userData.diameter * asteroid.userData.diameter);
+        const numDebrisParticles = Math.ceil(150 * diameter * diameter);
         ({ positions, velocities } = generateSplitDebris(projectedPoints, asteroid.userData.velocity, impact, numDebrisParticles, 0.25, 0.1, 0.05));
         const slowDebrisLifetime = 3.5 + Math.random();
         this.addColorParticleChunk(positions, velocities, slowDebrisLifetime, 3.0, 0, 0.9, 0x555555, THREE.NormalBlending, 0.025, 1);
@@ -160,17 +163,17 @@ export class ParticleSystem {
         this.addColorParticleChunk(positions, velocities, fastDebrisLifetime, 1.0, 0, 1, 0x555555, THREE.NormalBlending, 0.025, 1);
     }
 
-    handleDefaultBreakdown(asteroid) {
-        const surfaceSampler = new SurfaceSampler(asteroid.geometry);
+    handleAsteroidExplosion(asteroid) {
+        asteroid.userData.surfaceSampler = asteroid.userData.surfaceSampler || new SurfaceSampler(asteroid.geometry);
 
         // Debris
-        const numChunks = Math.ceil(15 * asteroid.userData.diameter); // TODO volume instead diameter?
-        const chunkSize = Math.ceil(15 * asteroid.userData.diameter);
+        const numChunks = Math.ceil(200 * asteroid.userData.volume);
+        const chunkSize = Math.ceil(200 * asteroid.userData.volume);
         for (let i = 0; i < numChunks; i++) {
             const debrisPositions = [];
             const debrisVelocities = [];
             for (let j = 0; j < chunkSize; j++) {
-                const point = asteroid.localToWorld(surfaceSampler.getRandomPoint());
+                const point = asteroid.localToWorld(asteroid.userData.surfaceSampler.getRandomPoint());
                 debrisPositions.push(point.x, point.y, point.z);
                 const vel = getRotatedPointVelocity(point, asteroid);
 
@@ -186,11 +189,29 @@ export class ParticleSystem {
         }
 
         // Smoke
-        const numSmokeParticles = Math.ceil(25 * asteroid.userData.diameter);
+        const numSmokeParticles = Math.ceil(250 * asteroid.userData.volume);
         const smokePositions = [];
         const smokeVelocities = [];
         for (let j = 0; j < numSmokeParticles; j++) {
-            const point = asteroid.localToWorld(surfaceSampler.getRandomPoint());
+            const point = asteroid.localToWorld(asteroid.userData.surfaceSampler.getRandomPoint());
+            smokePositions.push(point.x, point.y, point.z);
+            const vel = getRotatedPointVelocity(point, asteroid);
+            smokeVelocities.push(vel.x, vel.y, vel.z);
+        }
+
+        const smokeLifetime = 5.0 + (2 * Math.random() - 1);
+        this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 100.0, 0.4, 0.8, this.smokeTexture, THREE.NormalBlending, 0.8, 1);
+    }
+
+    handleAsteroidCollision(asteroid, damage) {
+        asteroid.userData.surfaceSampler = asteroid.userData.surfaceSampler || new SurfaceSampler(asteroid.geometry);
+
+        // Smoke
+        const numSmokeParticles = Math.ceil(0.75 * damage);
+        const smokePositions = [];
+        const smokeVelocities = [];
+        for (let j = 0; j < numSmokeParticles; j++) {
+            const point = asteroid.localToWorld(asteroid.userData.surfaceSampler.getRandomPoint());
             smokePositions.push(point.x, point.y, point.z);
             const vel = getRotatedPointVelocity(point, asteroid);
             smokeVelocities.push(vel.x, vel.y, vel.z);
@@ -200,7 +221,7 @@ export class ParticleSystem {
         this.addTextureParticleChunk(smokePositions, smokeVelocities, smokeLifetime, 80.0, 0.4, 0.8, this.smokeTexture, THREE.NormalBlending, 0.8, 1);
     }
 
-    handlePlayerBreakdown(player, debrisRandomness = 0.3, smokeRandomness = 0.7) {
+    handlePlayerExplosion(player, debrisRandomness = 0.3, smokeRandomness = 0.7) {
         const numChunks = 15;
         const chunkSize = 15;
         const points = Array.from(iteratePoints(player)).map((point) => {
@@ -525,6 +546,22 @@ function getMeanVector3(vectors) {
     });
 
     return new THREE.Vector3(sumX / vectors.length, sumY / vectors.length, sumZ / vectors.length);
+}
+
+/**
+ * Returns the maximum distance between any pair of vectors in the array.
+ * @param {Array} vectors Array of THREE.Vector3
+ */
+function getMaxPairDistance(vectors) {
+    let distSq = 0;
+    for (let a = 0; a < vectors.length; a++) {
+        for (let b = a + 1; b < vectors.length; b++) {
+            const abx = vectors[a].x - vectors[b].x, aby = vectors[a].y - vectors[b].y;
+            const abDistSq = abx * abx + aby * aby;
+            if (abDistSq > distSq) { distSq = abDistSq; }
+        }
+    }
+    return Math.sqrt(distSq);
 }
 
 function getRotatedPointVelocity(point, obj, resolution = 0.01) {

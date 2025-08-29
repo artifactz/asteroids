@@ -176,6 +176,7 @@ export class World {
             const damage = 25 * otherMesh.userData.volume * impulse.length();
             asteroid.userData.health -= damage;
             // console.log("Inflicting collision damage: " + damage + " health left: " + asteroid.userData.health);
+            this.particles.handleAsteroidCollision(asteroid, damage);
             if (asteroid.userData.health <= 0 && !asteroid.userData.isSplitting) {
                 const impact = { point: asteroid.position.clone().addScaledVector(otherMesh.position.clone().sub(asteroid.position).normalize(), 0.5 * asteroid.userData.diameter) };
                 impact.velocity = asteroid.position.clone().sub(impact.point).normalize();
@@ -233,7 +234,7 @@ export class World {
      */
     explodeAsteroid(asteroid) {
         this.player.userData.material += asteroid.userData.materialValue * asteroid.userData.volume;
-        this.particles.handleDefaultBreakdown(asteroid);
+        this.particles.handleAsteroidExplosion(asteroid);
         this.removeAsteroid(asteroid);
     }
 
@@ -304,7 +305,7 @@ export class World {
         asteroid.userData.recentImpact = impact;
         asteroid.userData.nibble(impact);
 
-        this.particles.handleDefaultImpact(impact, asteroid);
+        this.particles.handleLaserAsteroidImpact(impact, asteroid);
         this.removeLaser(laser);
 
         if (asteroid.userData.health <= 0 && !asteroid.userData.isSplitting) {
@@ -313,7 +314,7 @@ export class World {
     }
 
     handlePlayerCollision() {
-        this.particles.handlePlayerBreakdown(this.player);
+        this.particles.handlePlayerExplosion(this.player);
         this.physics.disableAmmo(this.player);
         this.player.userData.isAlive = false;
         this.player.userData.speed = 0;
@@ -390,7 +391,7 @@ export class World {
 
         this.removeAsteroid(parentAsteroid);
 
-        this.particles.handleDefaultSplit(parentAsteroid.userData.recentImpact, parentAsteroid, splitAsteroids[0]);
+        this.particles.handleAsteroidSplit(parentAsteroid.userData.recentImpact, parentAsteroid, splitAsteroids[0]);
     }
 }
 
