@@ -30,8 +30,15 @@ export function updateThrustBar(value) {
     });
 }
 
+
+let lastMaterialValue = null;
+
 export function updateMaterial(value) {
-    materialText.innerHTML = value.toFixed(1);
+    const materialValue = value.toFixed(1);
+    if (materialValue != lastMaterialValue) {
+        materialText.innerHTML = materialValue;
+        lastMaterialValue = materialValue;
+    }
 }
 
 export function updateFps(value) {
