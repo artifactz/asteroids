@@ -33,12 +33,11 @@ export class Physics {
     }
 
     /**
-     * 
-     * @param {*} mesh 
-     * @param {*} param1 
-     * @param {*} enableAmmo 
-     * @param {*} easeInSeconds 
-     * @returns 
+     * Adds a mesh to physics world.
+     * @param {THREE.Mesh} mesh 
+     * @param {*} ammoParams 
+     * @param {boolean} enableAmmo Whether to use ammo.js, i.e., whether to enable collisions.
+     * @param {number} easeInSeconds Time spent in "ease-in" physics group, in which collisions with each other are disabled.
      */
     add(mesh, { mass = 1, restitution = 0.999, friction = 0, rollingFriction = 1, dampingA = 0, dampingB = 0 } = {}, enableAmmo = true, easeInSeconds = 0) {
         if (this.meshes.has(mesh)) { return; }
@@ -178,7 +177,6 @@ export class Physics {
 
     /**
      * Updates mesh position and orientation from its physics state. Updates physics state to steer toward z=0.
-     * @param {*} mesh
      * @returns {boolean} True if mesh was updated, false if not.
      */
     updateAmmoMesh(mesh, dt) {
@@ -209,8 +207,7 @@ export class Physics {
             // Steer toward z = 0 using PD controller
             const vel = body.getLinearVelocity();
             const controlP = 1, controlD = 0.5;
-            vel.setZ(vel.z() - (controlP * p.z() + controlD * vel.z()) * dt);
-            body.setLinearVelocity(vel);
+            this.applyImpulse(mesh, new THREE.Vector3(0, 0, -(controlP * p.z() + controlD * vel.z()) * dt));
             Ammo.destroy(vel);
         }
 
@@ -222,6 +219,7 @@ export class Physics {
         return true;
     }
 
+    /** Updates mesh pose without ammo.js. */
     updateBasicMesh(mesh, dt) {
         mesh.position.addScaledVector(mesh.userData.velocity, dt);
         if (mesh.userData.collisionAge > 0.2) {
@@ -232,6 +230,7 @@ export class Physics {
         applyRotation(mesh, dt);
     }
 
+    /** Calls userData.handleCollision of colliding ammo.js bodies if available. */
     handleCollisions() {
         const dispatcher  = this.ammoWorld.getDispatcher();
         const numManifolds = dispatcher.getNumManifolds();
@@ -249,7 +248,6 @@ export class Physics {
                 const ammoContactPointB = ammoContactPoints.getPositionWorldOnB();
                 const contactPointA = new THREE.Vector3(ammoContactPointA.x(), ammoContactPointA.y(), ammoContactPointA.z());
                 const contactPointB = new THREE.Vector3(ammoContactPointB.x(), ammoContactPointB.y(), ammoContactPointB.z());
-                // // pt.getDistance()
 
                 const meshA = this.meshesByAmmoId.get(objA.ptr);
                 const meshB = this.meshesByAmmoId.get(objB.ptr);
@@ -265,6 +263,29 @@ export class Physics {
                 if (meshB.userData.handleCollision) { meshB.userData.handleCollision(meshA, contactPointB, impulseB, impulseA); }
             }
         }
+    }
+
+    /** Adds vector to ammo.js body velocity. */
+    applyImpulse(mesh, vector) {
+        const body = mesh.userData.physicsBody;
+        if (!body) { return false; }
+
+        const vel = body.getLinearVelocity();
+        vel.setX(vel.x() + vector.x);
+        vel.setY(vel.y() + vector.y);
+        vel.setZ(vel.z() + vector.z);
+        body.setLinearVelocity(vel);
+        Ammo.destroy(vel);
+    }
+
+    /** Sets ammo.js body velocity. */
+    setVelocity(mesh, vector) {
+        const body = mesh.userData.physicsBody;
+        if (!body) { return false; }
+
+        const vel = new Ammo.btVector3(vector.x, vector.y, vector.z);
+        body.setLinearVelocity(vel);
+        Ammo.destroy(vel);
     }
 }
 

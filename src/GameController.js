@@ -1,22 +1,35 @@
-import { initHud, showGameOver, showGameStart, showHud, updateMaterial, updateThrustBar } from './Hud';
+import * as THREE from 'three';
+import { showGameOver, showGameStart, showHud, updateMaterial, updateThrustBar } from './Hud';
 import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting';
-import { checkLaserHit } from './GameObjects.js';
+import { World } from './GameObjects.js';
 
-export const GameState = {
+const GameState = {
     StartScreen: 'StartScreen',
     Playing: 'Playing',
     EndScreen: 'EndScreen',
 };
 
+const GameParameters = {
+    numStartAsteroids: 4,
+    initialAsteroidSpawnProbability: 10.0,
+    asteroidSpawnDistance: 32,
+    asteroidSpawnProbabilityGainPerSecond: 0.15,
+    maxAsteroids: 100
+}
+
 export class GameController {
+    /**
+     * @param {World} world 
+     * @param {number} startScreenPlayerSpeed 
+     */
     constructor(world, startScreenPlayerSpeed = 40) {
         this.world = world;
         this.prevState = null;
         this.state = GameState.StartScreen;
         this.isEaseInStage = false; // transition between StartScreen and Playing
-        this.asteroidSpawnDistance = 32;
+        this.isStartAsteroidStage = false; // initial game stage in which to spawn an asteroid cluster
+        this.startAsteroidAngles = []; // directions of already spawned asteroid clusters
         this.asteroidSpawnProbability = 10.0; // resets to 0 at every spawn
-        this.asteroidSpawnProbabilityGainPerSecond = 0.2;
 
         // Prepare start screen
         showGameStart();
@@ -53,6 +66,7 @@ export class GameController {
                     this.world.player.userData.speed = 0.5 * this.originalPlayerMaxSpeed;
                     this.world.player.userData.maxSpeed = this.originalPlayerMaxSpeed;
                     this.isEaseInStage = false;
+                    this.isStartAsteroidStage = true;
                 }
 
             } else {
@@ -69,6 +83,7 @@ export class GameController {
         this.world.updatePlayer(dt);
 
         this.maybeSpawnAsteroid(dt);
+        this.steerAsteroids(dt);
 
         // Shoot
         if (this.state == GameState.Playing && mouse[0] && this.world.player.userData.laserHeat <= 0) {
@@ -108,12 +123,264 @@ export class GameController {
     }
 
     maybeSpawnAsteroid(dt) {
-        if (this.state == GameState.Playing && !this.isEaseInStage) {
-            this.asteroidSpawnProbability += this.asteroidSpawnProbabilityGainPerSecond * dt;
-            if (Math.random() < this.asteroidSpawnProbability * dt) {
-                this.world.spawnAsteroid(this.asteroidSpawnDistance);
-                this.asteroidSpawnProbability = 0;
+        if (this.state != GameState.Playing || this.isEaseInStage) { return; }
+
+        if (this.isStartAsteroidStage) {
+            const angle = this.world.player.rotation.z;
+            if (this.isStartAsteroidAngleAvailable(angle)) {
+                for (const deltaAngle of linspace(-0.1 * Math.PI, 0.1 * Math.PI, GameParameters.numStartAsteroids)) {
+                    const position = this.world.player.position.clone().add(new THREE.Vector3(
+                        GameParameters.asteroidSpawnDistance * Math.cos(angle + deltaAngle),
+                        GameParameters.asteroidSpawnDistance * Math.sin(angle + deltaAngle),
+                        0
+                    ));
+                    const velocity = this.world.player.position.clone().sub(position).normalize().multiplyScalar(4);
+                    this.world.spawnAsteroid(position, velocity);
+                }
+                this.startAsteroidAngles.push(angle);
             }
+
+            const disableStartAsteroidsDistance = GameParameters.asteroidSpawnDistance / 2;
+            for (const asteroid of this.world.asteroids) {
+                if (asteroid.position.clone().sub(this.world.player.position).lengthSq() < disableStartAsteroidsDistance * disableStartAsteroidsDistance) {
+                    this.isStartAsteroidStage = false;
+                    console.log("End of start asteroids");
+                    break;
+                }
+            }
+
+            // Don't spawn random asteroids
+            return;
+        }
+
+        this.asteroidSpawnProbability += GameParameters.asteroidSpawnProbabilityGainPerSecond * dt;
+        if (this.world.asteroids.length < GameParameters.maxAsteroids && Math.random() < this.asteroidSpawnProbability * dt) {
+            const { position, velocity } = getOrthogonalCollisionTrajectory(this.world.player, GameParameters.asteroidSpawnDistance, 1);
+            this.world.spawnAsteroid(position, velocity);
+            this.asteroidSpawnProbability = 0;
         }
     }
+
+    isStartAsteroidAngleAvailable(angle) {
+        for (const existingAngle of this.startAsteroidAngles) {
+            if (Math.abs(angleDifference(existingAngle, angle)) < 0.25 * Math.PI) { return false; }
+        }
+        return true;
+    }
+
+    steerAsteroids(dt) {
+        if (this.state != GameState.Playing) { return; }
+
+        for (const asteroid of this.world.asteroids) {
+            if (!asteroid.userData.behavior && asteroid.userData.volume > 2.0) {
+                asteroid.userData.behavior = (Math.random() < 0.2)
+                    ? new CrashPlayerBehavior(asteroid, this.world)
+                    : new ApproachPlayerBehavior(asteroid, this.world);
+                    // : new CrashAsteroidBehavior(asteroid, this.world);
+                    // : new Behavior();
+                // asteroid.userData.behavior = new ApproachPlayerBehavior(asteroid, this.world)
+            }
+            if (asteroid.userData.behavior) { asteroid.userData.behavior.act(dt) };
+        }
+    }
+}
+
+class Behavior {
+    act(dt) {}
+}
+
+class ApproachPlayerBehavior /*extends Behavior*/ {
+    constructor(asteroid, world, speed = 1) {
+        this.asteroid = asteroid;
+        this.world = world;
+        this.speed = speed;
+    }
+
+    act(dt) {
+        const target = this.world.player;
+        let point = target.position.clone();
+
+        // Don't modify velocity at all when close to player
+        if (this.asteroid.position.clone().sub(point).lengthSq() < 36) { return; }
+
+        // Crude player movement estimation, TODO: estimate collision point
+        let distance, seconds;
+        for (let i = 0; i < 10; i++) {
+            distance = point.clone().sub(this.asteroid.position).length();
+            seconds = distance / this.speed;
+            point = target.position.clone().addScaledVector(target.userData.velocity, seconds);
+        }
+
+        // // Render point for testing
+        // if (!this.asteroid.userData.collisionPoint) {
+        //     const geometry = new THREE.BufferGeometry();
+        //     geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0], 3));
+        //     this.asteroid.userData.collisionPoint = new THREE.Points(
+        //         geometry,
+        //         new THREE.PointsMaterial({ color: 0xff0000, size: 1 })
+        //     );
+        //     this.world.scene.add(this.asteroid.userData.collisionPoint);
+        // }
+        // this.asteroid.userData.collisionPoint.position.copy(point);
+
+        const vel = point.sub(this.asteroid.position).normalize().multiplyScalar(this.speed);
+        const playerDistance = target.position.clone().sub(this.asteroid.position).length();
+        const alpha = (1 - Math.pow(0.001, dt)) * sigmoid(0.333 * (playerDistance - 24));
+        vel.multiplyScalar(alpha).addScaledVector(this.asteroid.userData.velocity, 1 - alpha);
+        this.world.physics.setVelocity(this.asteroid, vel);
+    }
+}
+
+class CrashPlayerBehavior /*extends Behavior*/ {
+    /**
+     * @param {THREE.Mesh} asteroid 
+     * @param {World} world 
+     */
+    constructor(asteroid, world) {
+        this.asteroid = asteroid;
+        this.world = world;
+    }
+
+    act(dt) {
+        const target = this.world.player;
+        if (target.position.clone().sub(this.asteroid.position).lengthSq() < 20 * 20) {
+            // Don't act
+            return;
+        }
+        const controlP = 0.02, controlD = 0.5;
+        const offset = target.position.clone().sub(this.asteroid.position);
+        const impulse = offset.multiplyScalar(controlP * dt).addScaledVector(target.userData.velocity.clone().sub(this.asteroid.userData.velocity), controlD * dt);
+        this.world.physics.applyImpulse(this.asteroid, impulse);
+        // const vel = target.position.clone().addScaledVector(target.userData.velocity, 5).sub(this.asteroid.position).normalize().multiplyScalar(1.5);
+        // this.world.physics.setVelocity(this.asteroid, vel);
+    }
+}
+
+class CrashAsteroidBehavior /*extends Behavior*/ {
+    /**
+     * @param {THREE.Mesh} asteroid 
+     * @param {World} world 
+     */
+    constructor(asteroid, world) {
+        this.asteroid = asteroid;
+        this.world = world;
+        this.chooseTarget();
+    }
+
+    act(dt) {
+        if (this.target.isRemoved) { this.chooseTarget(); }
+
+        const controlP = 0.02, controlD = 0.5;
+        const offset = this.target.position.clone().sub(this.asteroid.position);
+        const impulse = offset.multiplyScalar(controlP * dt).addScaledVector(this.target.userData.velocity.clone().sub(this.asteroid.userData.velocity), controlD * dt);
+        this.world.physics.applyImpulse(this.asteroid, impulse);
+    }
+
+    chooseTarget() {
+        this.target = this.world.asteroids[Math.floor(Math.random() * this.world.asteroids.length)];
+    }
+}
+
+/**
+ * Calculates a position and velocity such that it collides with the player, assuming constant movement.
+ */
+function getOrthogonalCollisionTrajectory(player, distance, speed) {
+    // position_asteroid + t * velocity_asteroid == position_player + t * velocity_player
+
+    // in 2D
+    // (1) a + t * c == p + t * x
+    // (2) b + t * d == q + t * y
+
+    // known: p, q, x, y
+    // (a - p)^2 + (b - q)^2 == r^2 == distance^2
+    // c^2 + d^2 == s^2 == speed^2
+
+    // Construct right triangle with a = asteroid_movement, b = player_movement, c = distance.
+    // Point C is the collision point. This means the asteroid always hits from the side.
+    // (t * c)^2 + (t * d)^2 + (t * x)^2 + (t * y)^2 == r^2
+
+    // Rearrange
+    // t^2 * (c^2 + x^2 + y^2 + d^2) == r^2
+
+    // Insert asteroid speed
+    // t^2 * (x^2 + y^2 + s^2) == r^2
+
+    // Rearrange
+    // t^2 == r^2 / (x^2 + y^2 + s^2)
+    // => t == sqrt(r^2 / (x^2 + y^2 + s^2))
+
+    // So we can calculate the collision time
+    const v = player.userData.velocity;
+    const t = Math.sqrt(distance * distance / (v.x * v.x + v.y * v.y + speed * speed));
+
+    // And thus the collision point
+    const vector = player.position.clone().addScaledVector(player.userData.velocity, t);
+
+    // The asteroid position is on a circle with r=distance around the player
+    // And on a circle with r=speed*t around the collision point
+    const [[x1, y1], [x2, y2]] = intersectTwoCircles(
+        player.position.x, player.position.y, distance,
+        vector.x, vector.y, speed * t
+    );
+    // Both intersections are equally far from the player, choose one randomly
+    const [x, y] = Math.random() < 0.5 ? [x1, y1] : [x2, y2];
+
+    const position = { x, y, z: 0 };
+
+    // Steer towards collision point
+    vector.sub(position).normalize().multiplyScalar(speed);
+
+    return { position, velocity: vector };
+}
+
+/**
+ * Calculates the two intersection points of two circles. Based on:
+ * https://gist.github.com/jupdike/bfe5eb23d1c395d8a0a1a4ddd94882ac
+ * http://math.stackexchange.com/a/1367732
+ * @returns Two coordinate pairs if there is at least one intersection, same coordinates twice if the circles touch,
+ *          empty list if there is no intersection.
+ */
+function intersectTwoCircles(x1, y1, r1, x2, y2, r2) {
+    const dx = x1 - x2;
+    const dy = y1 - y2;
+
+    const rSq = dx * dx + dy * dy;
+    var r = Math.sqrt(rSq);
+    if (!(Math.abs(r1 - r2) <= r && r <= r1 + r2)) {
+        // No intersection
+        return [];
+    }
+
+    // Intersection(s) exist
+    const a = (r1 * r1 - r2 * r2);
+    const b = a / (2 * rSq);
+    const c = Math.sqrt(2 * (r1 * r1 + r2 * r2) / rSq - (a * a) / (rSq * rSq) - 1);
+
+    var fx = (x1 + x2) / 2 + b * (x2 - x1);
+    var gx = c * (y2 - y1) / 2;
+    var ix1 = fx + gx;
+    var ix2 = fx - gx;
+
+    var fy = (y1 + y2) / 2 + b * (y2 - y1);
+    var gy = c * (x1 - x2) / 2;
+    var iy1 = fy + gy;
+    var iy2 = fy - gy;
+
+    return [[ix1, iy1], [ix2, iy2]];
+}
+
+function sigmoid(x) {
+    return 1 / (1 + Math.exp(-x));
+}
+
+function linspace(start, stop, num, endpoint = true) {
+    const div = endpoint ? (num - 1) : num;
+    const step = (stop - start) / div;
+    return Array.from({length: num}, (_, i) => start + step * i);
+}
+
+function angleDifference(a, b) {
+    let c = a - b + Math.PI;
+    if (c < 0) { c += Math.ceil(Math.abs(c) / 2 * Math.PI) * 2 * Math.PI}
+    return c % (2 * Math.PI) - Math.PI;
 }

@@ -108,67 +108,21 @@ export class World {
      * @param {*} distance Distance to player
      * @param {*} speed Asteroid speed
      */
-    spawnAsteroid(distance = 32, speed = 1.0) {
-        const asteroid = this.createAsteroid(createAsteroidGeometry());
-
-        // Calculate asteroid position and velocity such that it collides with the player, assuming constant movement.
-
-        // position_asteroid + t * velocity_asteroid == position_player + t * velocity_player
-
-        // in 2D
-        // (1) a + t * c == p + t * x
-        // (2) b + t * d == q + t * y
-
-        // known: p, q, x, y
-        // (a - p)^2 + (b - q)^2 == r^2 == distance^2
-        // c^2 + d^2 == s^2 == speed^2
-
-        // Construct right triangle with a = asteroid_movement, b = player_movement, c = distance.
-        // Point C is the collision point. This means the asteroid always hits from the side.
-        // (t * c)^2 + (t * d)^2 + (t * x)^2 + (t * y)^2 == r^2
-
-        // Rearrange
-        // t^2 * (c^2 + x^2 + y^2 + d^2) == r^2
-
-        // Insert asteroid speed
-        // t^2 * (x^2 + y^2 + s^2) == r^2
-
-        // Rearrange
-        // t^2 == r^2 / (x^2 + y^2 + s^2)
-        // => t == sqrt(r^2 / (x^2 + y^2 + s^2))
-
-        // So we can calculate the collision time
-        const v = this.player.userData.velocity;
-        const t = Math.sqrt(distance * distance / (v.x * v.x + v.y * v.y + speed * speed));
-
-        // And thus the collision point
-        const vector = this.player.position.clone().addScaledVector(this.player.userData.velocity, t);
-
-        // The asteroid position is on a circle with r=distance around the player
-        // And on a circle with r=speed*t around the collision point
-        const [[x1, y1], [x2, y2]] = intersectTwoCircles(
-            this.player.position.x, this.player.position.y, distance,
-            vector.x, vector.y, speed * t
-        );
-        // Both intersections are equally far from the player, choose one randomly
-        const [x, y] = Math.random() < 0.5 ? [x1, y1] : [x2, y2];
-
-        asteroid.position.set(x, y, 0);
-
-        // Steer towards collision point
-        vector.sub(asteroid.position).normalize().multiplyScalar(speed);
-        asteroid.userData.velocity.copy(vector);
-
-        this.physics.add(asteroid, { mass: asteroid.userData.volume });
-        this.asteroids.push(asteroid);
-        this.scene.add(asteroid);
+    spawnAsteroid(position, velocity) {
+        const asteroid = createAsteroid(createAsteroidGeometry());
+        asteroid.position.copy(position);
+        asteroid.userData.velocity.copy(velocity);
+        this.addAsteroid(asteroid);
 
         console.log("Spawned asteroid distanceToPlayer=" + asteroid.position.clone().sub(this.player.position).length());
     }
 
-    createAsteroid(geometry) {
-        const asteroid = createAsteroid(geometry);
-
+    /**
+     * Adds asteroid to game world.
+     * @param {THREE.Mesh} asteroid 
+     * @param {number} physicsEaseInSeconds Time spent in "ease-in" physics group, in which collisions with each other are disabled.
+     */
+    addAsteroid(asteroid, physicsEaseInSeconds = 0) {
         // Add collision handling
         asteroid.userData.handleCollision = (otherMesh, contactPoint, impulse, otherImpulse) => {
             if (otherMesh.userData.type != "asteroid") { return; }
@@ -185,7 +139,9 @@ export class World {
             }
         };
 
-        return asteroid;
+        this.physics.add(asteroid, { mass: asteroid.userData.volume }, true, physicsEaseInSeconds);
+        this.asteroids.push(asteroid);
+        this.scene.add(asteroid);
     }
 
     /**
@@ -332,7 +288,7 @@ export class World {
             result.geometry = new THREE.BufferGeometry();
             result.geometry.setAttribute("position", new THREE.Float32BufferAttribute(result.vertexArray, 3));
             result.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(result.normalArray, 3));
-            const mesh = this.createAsteroid(result.geometry);
+            const mesh = createAsteroid(result.geometry);
 
             // Rotation since split begin
             const rotation = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(
@@ -382,9 +338,7 @@ export class World {
             if (mesh.userData.volume <= this.asteroidExplosionVolume) {
                 this.explodeAsteroid(mesh);
             } else {
-                this.scene.add(mesh);
-                this.asteroids.push(mesh);
-                this.physics.add(mesh, { mass: mesh.userData.volume }, true, 0.5);
+                this.addAsteroid(mesh, 0.5);
             }
             splitAsteroids.push(mesh);
         });
@@ -421,40 +375,4 @@ export function checkLaserHit(laser, asteroids, dt) {
     }
 
     return null;
-}
-
-/**
- * Calculates the two intersection points of two circles. Based on:
- * https://gist.github.com/jupdike/bfe5eb23d1c395d8a0a1a4ddd94882ac
- * http://math.stackexchange.com/a/1367732
- * @returns Two coordinate pairs if there is at least one intersection, same coordinates twice if the circles touch,
- *          empty list if there is no intersection.
- */
-function intersectTwoCircles(x1, y1, r1, x2, y2, r2) {
-    const dx = x1 - x2;
-    const dy = y1 - y2;
-
-    const rSq = dx * dx + dy * dy;
-    var r = Math.sqrt(rSq);
-    if (!(Math.abs(r1 - r2) <= r && r <= r1 + r2)) {
-        // No intersection
-        return [];
-    }
-
-    // Intersection(s) exist
-    const a = (r1 * r1 - r2 * r2);
-    const b = a / (2 * rSq);
-    const c = Math.sqrt(2 * (r1 * r1 + r2 * r2) / rSq - (a * a) / (rSq * rSq) - 1);
-
-    var fx = (x1 + x2) / 2 + b * (x2 - x1);
-    var gx = c * (y2 - y1) / 2;
-    var ix1 = fx + gx;
-    var ix2 = fx - gx;
-
-    var fy = (y1 + y2) / 2 + b * (y2 - y1);
-    var gy = c * (x1 - x2) / 2;
-    var iy1 = fy + gy;
-    var iy2 = fy - gy;
-
-    return [[ix1, iy1], [ix2, iy2]];
 }
