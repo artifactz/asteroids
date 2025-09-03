@@ -16,9 +16,10 @@ THREE.Mesh.prototype.raycast = acceleratedRaycast;
  */
 export class World {
     /**
-     * @param {THREE.DepthTexture} depthTexture  Main scene depth buffer for the particle renderer.
+     * @param {THREE.WebGLRenderer} renderer Renderer reference for the nebula generator.
+     * @param {THREE.DepthTexture} depthTexture Main scene depth buffer for the particle renderer.
      */
-    constructor(depthTexture, asteroidExplosionVolume = 0.15, asteroidRemovalDistance = 60) {
+    constructor(renderer, depthTexture, asteroidExplosionVolume = 0.15, asteroidRemovalDistance = 60) {
         this.asteroidExplosionVolume = asteroidExplosionVolume;
         this.asteroidRemovalDistance = asteroidRemovalDistance;
 
@@ -27,7 +28,7 @@ export class World {
         this.clearColor = new THREE.Color(0x000000);
         this.camera = this.createCamera();
         this.addDefaultLights();
-        this.universe = new Universe(this.scene, this.camera);
+        this.universe = new Universe(this.scene, this.camera, renderer);
         this.player = this.createPlayer();
         this.scene.add(this.player);
 

@@ -24,10 +24,10 @@ export class SmokeLighting {
         this.smokeLightingMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 tSmoke: { value: this.ping.texture },
-                resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                lights: { value: [] },
+                lightUVs: { value: [] },
                 lightColors: { value: [] },
                 lightIntensities: { value: [] },
+                lightFalloffRatios: { value: [] },
                 numLights: { value: 0 },
             },
             vertexShader: `
@@ -40,10 +40,10 @@ export class SmokeLighting {
             // TODO make falloff depend on PointLight.decay
             fragmentShader: `
                 uniform sampler2D tSmoke;
-                uniform vec2 resolution;
-                uniform vec2 lights[${maxLights}];
+                uniform vec2 lightUVs[${maxLights}];
                 uniform vec3 lightColors[${maxLights}];
                 uniform float lightIntensities[${maxLights}];
+                uniform float lightFalloffRatios[${maxLights}];
                 uniform int numLights;
 
                 varying vec2 vUv;
@@ -56,9 +56,9 @@ export class SmokeLighting {
                     for (int i = 0; i < ${maxLights}; i++) {
                         if (i >= numLights) break;
 
-                        vec2 lightUV = lights[i];
+                        vec2 lightUV = lightUVs[i];
                         float dist = distance(vUv, lightUV);
-                        float falloff = exp(-18.0 * dist);
+                        float falloff = exp(-lightFalloffRatios[i] * dist);
                         litColor += lightColors[i] * lightIntensities[i] * falloff;
                     }
 
@@ -99,7 +99,7 @@ export class SmokeLighting {
      */
     updateLights(scene, camera) {
         let lights = [];
-        for (const element of scene.children) {
+        scene.traverse((element) => {
             if (element instanceof THREE.PointLight) {
                 const light = element;
 
@@ -112,13 +112,17 @@ export class SmokeLighting {
                 vector.x = (vector.x + 1) / 2;
                 vector.y = (vector.y + 1) / 2;
 
+                const z = light.localToWorld(new THREE.Vector3()).z;
+
                 lights.push({
                     position: new THREE.Vector2(vector.x, vector.y),
                     color: light.color,
-                    intensity: light.intensity
+                    // Lights further from z=0 are weaker and have less falloff
+                    intensity: light.intensity * Math.exp(-Math.abs(0.1 * z)),
+                    falloffRatio: 18.0 * Math.exp(-Math.abs(0.015 * z))
                 });
             }
-        }
+        });
 
         if (lights.length > this.maxLights) {
             // Keep lights close to screen center
@@ -134,13 +138,15 @@ export class SmokeLighting {
             lights.push({
                 position: new THREE.Vector2(),
                 color: new THREE.Color(0, 0, 0),
-                intensity: 0
+                intensity: 0,
+                falloffRatio: 0
             });
         }
 
-        this.smokeLightingMaterial.uniforms.lights.value = lights.map((light) => light.position);
+        this.smokeLightingMaterial.uniforms.lightUVs.value = lights.map((light) => light.position);
         this.smokeLightingMaterial.uniforms.lightColors.value = lights.map((light) => light.color);
         this.smokeLightingMaterial.uniforms.lightIntensities.value = lights.map((light) => light.intensity);
+        this.smokeLightingMaterial.uniforms.lightFalloffRatios.value = lights.map((light) => light.falloffRatio);
     }
 
     setSize(width, height) {

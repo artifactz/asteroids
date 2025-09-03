@@ -77,6 +77,7 @@ body {
   font-size: 128px;
   text-align: center;
   color: #36b4ffb9;
+  text-shadow: -5px -5px 0px #0007;
 }
 
 #start-text {

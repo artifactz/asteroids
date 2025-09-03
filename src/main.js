@@ -43,7 +43,7 @@ renderTarget.depthTexture = new THREE.DepthTexture();
 renderTarget.depthTexture.format = THREE.DepthFormat;
 renderTarget.depthTexture.type = THREE.UnsignedShortType;
 
-const world = new World(renderTarget.depthTexture);
+const world = new World(renderer, renderTarget.depthTexture);
 
 const blend = new Blend(THREE.NormalBlending);
 const smokeLighting = new SmokeLighting();

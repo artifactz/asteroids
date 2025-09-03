@@ -1,12 +1,14 @@
 import * as THREE from 'three';
-
+import { NebulaGenerator, NebulaMaterials } from '../Nebula.js'
 
 const textureLoader = new THREE.TextureLoader()
 const brightStarTexture = textureLoader.load('media/bright_star.png');
+brightStarTexture.colorSpace = THREE.SRGBColorSpace;
 
 
 export class Universe {
-    constructor(scene, camera) {
+    constructor(scene, camera, renderer) {
+        this.nebulaGenerator = new NebulaGenerator(renderer);
         this.layers = [
             new UniverseLayer(-150, scene, camera, (size) => { return createPointStarMesh(size, 40, 0, 50); }),
             new UniverseLayer(-200, scene, camera, (size) => { return createPointStarMesh(size, 80, 0, 50, 0xffffff, 0.75); }),
@@ -23,26 +25,11 @@ export class Universe {
 
             new UniverseLayer(-500, scene, camera, (size) => { return createPointStarMesh(size, 500, 0, 300, 0xfff0f0, 0.55); }),
 
-            new UniverseLayer(-50, scene, camera, (size) => { return createBrightStarTextureMesh(size); }, RotatingUniverseTile),
+            new UniverseLayer(-50, scene, camera, (size) => { return Math.random() < 0.5 ? createBrightStarTextureMesh(size) : null; }, RotatingUniverseTile),
 
-            // new UniverseLayer(-150, scene, camera, (size) => { return createPointStarMesh(size, 40, 0, 50); }),
-            // new UniverseLayer(-200, scene, camera, (size) => { return createPointStarMesh(size, 80, 0, 50, 0xffffff, 0.75); }),
-            // new UniverseLayer(-250, scene, camera, (size) => { return createPointStarMesh(size, 160, 0, 50, 0xccffff, 0.75); }),
-
-            // new UniverseLayer(-300, scene, camera, (size) => { return createPointStarMesh(size, 320, 0, 50, 0xaaddff, 0.5); }),
-            // new UniverseLayer(-300, scene, camera, (size) => { return createPointStarMesh(size, 25, 0, 50, 0x9999ff, 0.8); }),
-
-            // new UniverseLayer(-350, scene, camera, (size) => { return createPointStarMesh(size, 640, 0, 50, 0xaaffdd, 0.333); }),
-            // new UniverseLayer(-350, scene, camera, (size) => { return createPointStarMesh(size, 15, 0, 50, 0x99ffaa, 0.7); }),
-
-            // new UniverseLayer(-450, scene, camera, (size) => { return createPointStarMesh(size, 1280, 0, 100, 0xffcccc, 0.2); }),
-            // new UniverseLayer(-450, scene, camera, (size) => { return createPointStarMesh(size, 35, 0, 100, 0xff8888, 0.5); }),
-            // new UniverseLayer(-460, scene, camera, (size) => { return createPointStarMesh(size, 2000, 0, 100, 0xffffcc, 0.05); }),
-            // new UniverseLayer(-470, scene, camera, (size) => { return createPointStarMesh(size, 2000, 0, 100, 0xffffff, 0.02); }),
-
-            // new UniverseLayer(-500, scene, camera, (size) => { return createPointStarMesh(size, 500, 0, 300, 0xfff0f0, 0.55); }),
-
-            // new UniverseLayer(-50, scene, camera, (size) => { return createBrightStarTextureMesh(size); }, RotatingUniverseTile),
+            new UniverseLayer(-60, scene, camera, (size, tileX, tileY) => { return this.createNebulaMesh(size, tileX, tileY, 600, 0.5, 1.5, 8, 0.6, 0.5); }),
+            new UniverseLayer(-130, scene, camera, (size, tileX, tileY) => { return this.createNebulaMesh(size, tileX, tileY, 800, 0.5, 0.5, 8, 0.6, 0.5); }),
+            // new UniverseLayer(-550, scene, camera, (size, tileX, tileY) => { return this.createNebulaMesh(size, tileX, tileY, 900, 0.01, 0.2, 6, 1.0, 0.7, NebulaMaterials.GrayBackground); }),
         ];
     }
 
@@ -50,6 +37,16 @@ export class Universe {
         for (const layer of this.layers) {
             layer.update(camera);
         }
+    }
+
+    createNebulaMesh(size, tileX, tileY, resolution = 600, brightness = 1.0, rootCellSize = 1.0, iterations = 8, details = 0.5, density = 0.5, material = NebulaMaterials.PurpleClouds) {
+        const geometry = new THREE.PlaneGeometry(size, size);
+        const texture = this.nebulaGenerator.getTile(tileX, tileY, resolution, brightness, rootCellSize, iterations, details, density, material);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        console.log("Created texture");
+        const textureMaterial = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+        const mesh = new THREE.Mesh(geometry, textureMaterial);
+        return mesh;
     }
 }
 
@@ -104,7 +101,7 @@ export class UniverseLayer {
         const id = row + "," + col;
         const tile = this.tiles.get(id);
         if (!tile || !tile.visible) { return; }
-        this.scene.remove(tile.mesh);
+        if (tile.mesh) { this.scene.remove(tile.mesh); }
         tile.visible = false;
         // console.log("Disabled tile " + id + " at z=" + this.z);
     }
@@ -114,16 +111,16 @@ export class UniverseLayer {
         if (!this.tiles.has(id)) {
             // if (row != 0 || col != 0) { return; } // DEBUG
             // console.log("Generating tile " + id + " at z=" + this.z);
-            const mesh = this.meshGenerator(this.tileSize);
-            mesh.position.add(new THREE.Vector3(col * this.tileSize, row * this.tileSize, this.z));
+            const mesh = this.meshGenerator(this.tileSize, col, row);
+            if (mesh) { mesh.position.add(new THREE.Vector3(col * this.tileSize, row * this.tileSize, this.z)); }
             // const tile = { mesh, visible: true };
             const tile = new this.tileType(mesh);
             this.tiles.set(id, tile);
-            this.scene.add(tile.mesh);
+            if (tile.mesh) { this.scene.add(tile.mesh); }
         } else if (!this.tiles.get(id).visible) {
             const tile = this.tiles.get(id);
             tile.visible = true;
-            this.scene.add(tile.mesh);
+            if (tile.mesh) { this.scene.add(tile.mesh); }
         }
     }
 }
@@ -137,7 +134,9 @@ class UniverseTile {
 
 class RotatingUniverseTile extends UniverseTile {
     update(camera) {
-        this.mesh.rotation.z = Math.atan2(this.mesh.position.y - camera.position.y, this.mesh.position.x - camera.position.x);
+        if (this.mesh) {
+            this.mesh.rotation.z = Math.atan2(this.mesh.position.y - camera.position.y, this.mesh.position.x - camera.position.x);
+        }
     }
 }
 
@@ -168,18 +167,20 @@ function createPointStarMesh(size, starCount = 2500, minZ = -350, maxZ = -90, co
     return stars;
 }
 
-function createBrightStarTextureMesh(size, z = -50) {
+function createBrightStarTextureMesh(size) {
     const starSize = 55;
     const geometry = new THREE.PlaneGeometry(starSize, starSize);
-    brightStarTexture.colorSpace = THREE.SRGBColorSpace;
     const material = new THREE.MeshBasicMaterial({ map: brightStarTexture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+    const group = new THREE.Group();
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(
+    group.add(mesh);
+    group.add(new THREE.PointLight(0xffffff, 100, 200, 1.25));
+    group.position.set(
         -0.5 * starSize + Math.random() * (size - starSize),
         -0.5 * starSize + Math.random() * (size - starSize),
         0
     );
-    return mesh;
+    return group;
 }
 
 function projectOnZ(vector, camera, z) {
