@@ -22,7 +22,7 @@ shaderAsteroidMat.onBeforeCompile = shader => {
 
   // add edge uniforms
   shader.uniforms.edgeWidth     = { value: 0.35 };
-  shader.uniforms.edgeIntensity = { value: 0.027  };
+  shader.uniforms.edgeIntensity = { value: 0.027 };
   shader.uniforms.edgeColor     = { value: new THREE.Color(0xffffbb) };
 
   // modify the final color
@@ -85,6 +85,11 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
     Object.defineProperty(mesh.userData, "isSplitting", { get: function () { return mesh.userData.splitAge !== null; } });
 
     return mesh;
+}
+
+/** For loading scenes. */
+export function createDummyAsteroid() {
+    return new THREE.Mesh(new THREE.BoxGeometry(), shaderAsteroidMat);
 }
 
 /**

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
-import { createAsteroid, createAsteroidGeometry } from './world/Asteroid.js';
+import { createAsteroid, createAsteroidGeometry, createDummyAsteroid } from './world/Asteroid.js';
 import { Universe } from './world/Universe.js';
 import { ParticleSystem } from './Particles.js';
 import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
@@ -27,7 +27,7 @@ export class World {
         this.scene = new THREE.Scene();
         this.clearColor = new THREE.Color(0x000000);
         this.camera = this.createCamera();
-        this.addDefaultLights();
+        this.addDefaultLights(this.scene);
         this.universe = new Universe(this.scene, this.camera, renderer);
         this.player = this.createPlayer();
         this.scene.add(this.player);
@@ -50,12 +50,12 @@ export class World {
         return camera;
     }
 
-    addDefaultLights() {
+    addDefaultLights(scene) {
         const dLight = new THREE.DirectionalLight(0xffffff, 1);
         dLight.position.set(5, 5, 10);
         const aLight = new THREE.AmbientLight(0x707070);
-        this.scene.add(dLight);
-        this.scene.add(aLight);
+        scene.add(dLight);
+        scene.add(aLight);
     }
 
     createPlayer() {
@@ -347,6 +347,35 @@ export class World {
         this.removeAsteroid(parentAsteroid);
 
         this.particles.handleAsteroidSplit(parentAsteroid.userData.recentImpact, parentAsteroid, splitAsteroids[0]);
+    }
+
+    /** Provides dummy scenes with increasing number of lights to pre-compile shaders. */
+    *loadingScenes(numLights = 30) {
+        const scene = new THREE.Scene();
+        this.addDefaultLights(scene);
+
+        const asteroidBox = createDummyAsteroid();
+        scene.add(asteroidBox);
+
+        this.particles.scene = scene;
+        this.particles.addColorParticleChunk([-1.5, 0, 0], [0, 0, 0], 1, 1, 0, 0, 0x999999);
+        this.particles.addTextureParticleChunk([-2.5, 0, 0], [0, 0, 0], 1, 1, 0, 0, this.particles.smokeTexture, THREE.NormalBlending, 0.25, 1);
+        this.particles.particleChunks = [];
+        this.particles.scene = this.scene;
+
+        yield scene;
+
+        for (let i = 0; i < numLights; i++) {
+            const color = new THREE.Color(Math.random(), Math.random(), Math.random());
+            const light = new THREE.PointLight(color, 1, 10);
+            light.position.set(
+                2.0 * Math.cos(i / numLights * 2 * Math.PI),
+                2.0 * Math.sin(i / numLights * 2 * Math.PI),
+                1.5
+            );
+            scene.add(light);
+            yield scene;
+        }
     }
 }
 

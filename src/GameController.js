@@ -32,7 +32,6 @@ export class GameController {
         this.asteroidSpawnProbability = 10.0; // resets to 0 at every spawn
 
         // Prepare start screen
-        showGameStart();
         this.startScreenPlayerSpeed = startScreenPlayerSpeed;
         this.originalPlayerMaxSpeed = world.player.userData.maxSpeed;
         this.originalPlayerMaxRotationalSpeed = world.player.userData.maxRotationalSpeed;

@@ -58,8 +58,6 @@ export class Physics {
      * Enables ammo.js physics for a mesh.
      */
     enableAmmo(mesh, { mass = 1, restitution = 0.999, friction = 0, rollingFriction = 0, dampingA = 0, dampingB = 0, group = 1, mask = 1 } = {}) {
-        console.time('enableAmmo');
-
         const shape = shapeFromMesh(mesh);
         const transform = new Ammo.btTransform();
         transform.setIdentity();
@@ -88,8 +86,6 @@ export class Physics {
         mesh.userData.collisionAge = 0;
         mesh.userData.physicsBody = body;
         this.meshesByAmmoId.set(body.ptr, mesh);
-
-        console.timeEnd('enableAmmo');
     }
 
     /**

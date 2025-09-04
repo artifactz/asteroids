@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { getMousePositionAtZ } from './Targeting';
 import { World } from './GameObjects';
 import { SmokeLighting, Blend } from './PostProcessing';
-import { initHud, updateFps } from './Hud';
+import { initHud, showGameStart, updateFps } from './Hud';
 import { GameController } from './GameController';
 
 
@@ -68,7 +68,38 @@ window.addEventListener('resize', () => {
     smokeLighting.setSize(window.innerWidth, window.innerHeight);
 });
 
-// === Game Loop ===
+/** Renders world scene and lit smoke. */
+function render(scene, camera) {
+    renderer.setRenderTarget(renderTarget);
+    renderer.setClearColor(world.clearColor);
+    renderer.clear();
+    renderer.render(scene, camera);
+
+    renderer.setRenderTarget(null);
+    blend.render(renderer, renderTarget.texture);
+
+    smokeLighting.render(renderer, scene, camera);
+}
+
+/** Renders an empty scene until models and textures are availabe, then renders loading scenes and starts the game loop. */
+function animateLoading() {
+    const scene = new THREE.Scene();
+    scene.background = 0x000000;
+    render(scene, world.camera);
+
+    if (world.particles.smokeTexture && world.player.children.length) {
+        for (const scene of world.loadingScenes()) {
+            render(scene, world.camera);
+        }
+
+        showGameStart();
+        animate();
+    } else {
+        requestAnimationFrame(animateLoading);
+    }
+}
+
+/** Game Loop */
 function animate() {
     requestAnimationFrame(animate);
     const dt = clock.getDelta();
@@ -79,18 +110,8 @@ function animate() {
     }
 
     controller.update(keys, mouse, dt);
-
-    // Render
-    renderer.setRenderTarget(renderTarget);
-    renderer.setClearColor(world.clearColor);
-    renderer.clear();
-    renderer.render(world.scene, world.camera);
-
-    renderer.setRenderTarget(null);
-    blend.render(renderer, renderTarget.texture);
-
-    smokeLighting.render(renderer, world.scene, world.camera, dt);
+    render(world.scene, world.camera);
 
 }
 
-animate();
+animateLoading();

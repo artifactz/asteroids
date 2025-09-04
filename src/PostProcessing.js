@@ -53,9 +53,7 @@ export class SmokeLighting {
                     if (smoke.a == 0.0) { discard; }
                     vec3 litColor = smoke.rgb;
 
-                    for (int i = 0; i < ${maxLights}; i++) {
-                        if (i >= numLights) break;
-
+                    for (int i = 0; i < numLights; i++) {
                         vec2 lightUV = lightUVs[i];
                         float dist = distance(vUv, lightUV);
                         float falloff = exp(-lightFalloffRatios[i] * dist);
@@ -79,7 +77,7 @@ export class SmokeLighting {
     /**
      * Renders scene objects from the specified layer, estimates 2d lighting, and renders them to the screen buffer.
      */
-    render(renderer, scene, camera, dt, layer = 1) {
+    render(renderer, scene, camera, layer = 1) {
         renderer.setRenderTarget(this.ping);
         renderer.setClearColor(new THREE.Color(0x000000), 0);  // transparent black
         renderer.clear();
