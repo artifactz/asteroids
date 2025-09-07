@@ -66,14 +66,20 @@ export class UniverseLayer {
         this.tiles = new Map();
     }
 
-    getVisibleTiles(camera) {
+    /**
+     * @param {THREE.Camera} camera 
+     * @param {number} extra Size of margin beyond visible area to add to result.
+     *                       Results in tiles being generated earlier to avoid pop ins when moving fast.
+     * @returns {[left, right, bottom, top]} Tile coordinates of visible area.
+     */
+    getVisibleTiles(camera, extra = 0.2) {
         const bottomLeft = projectOnZ(new THREE.Vector3(-1, -1, 0), camera, this.z);
         const topRight = projectOnZ(new THREE.Vector3(1, 1, 0), camera, this.z);
         return [
-            Math.round(bottomLeft.x / this.tileSize),
-            Math.round(topRight.x / this.tileSize),
-            Math.round(bottomLeft.y / this.tileSize),
-            Math.round(topRight.y / this.tileSize)
+            Math.round(bottomLeft.x / this.tileSize - extra),
+            Math.round(topRight.x / this.tileSize + extra),
+            Math.round(bottomLeft.y / this.tileSize - extra),
+            Math.round(topRight.y / this.tileSize + extra)
         ];
     }
 
