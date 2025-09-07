@@ -85,6 +85,7 @@ export class Physics {
         this.ammoWorld.addRigidBody(body, group, mask);
         mesh.userData.collisionAge = 0;
         mesh.userData.physicsBody = body;
+        mesh.userData.physicsShape = shape;
         this.meshesByAmmoId.set(body.ptr, mesh);
     }
 
@@ -100,6 +101,8 @@ export class Physics {
         this.meshesByAmmoId.delete(body.ptr);
         Ammo.destroy(body);
         mesh.userData.physicsBody = null;
+        Ammo.destroy(mesh.userData.physicsShape);
+        mesh.userData.physicsShape = null;
     }
 
     remove(mesh) {
