@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SurfaceSampler, iteratePoints, pointToLineDistanceSquared } from './GeometryUtils.js';
+import { SurfaceSampler, getRotatedPointVelocity, iteratePoints, pointToLineDistanceSquared } from './GeometryUtils.js';
 
 
 /**
@@ -562,18 +562,6 @@ function getMaxPairDistance(vectors) {
         }
     }
     return Math.sqrt(distSq);
-}
-
-function getRotatedPointVelocity(point, obj, resolution = 0.01) {
-    const transformedPoint = point.clone().sub(obj.position);
-    transformedPoint.applyAxisAngle(new THREE.Vector3(1, 0, 0), resolution * obj.userData.rotationalVelocity.x);
-    transformedPoint.applyAxisAngle(new THREE.Vector3(0, 1, 0), resolution * obj.userData.rotationalVelocity.y);
-    transformedPoint.applyAxisAngle(new THREE.Vector3(0, 0, 1), resolution * obj.userData.rotationalVelocity.z);
-    transformedPoint.x += resolution * obj.userData.velocity.x + obj.position.x;
-    transformedPoint.y += resolution * obj.userData.velocity.y + obj.position.y;
-    transformedPoint.z += resolution * obj.userData.velocity.z + obj.position.z;
-    const velocity = transformedPoint.clone().sub(point).multiplyScalar(1 / resolution);
-    return velocity;
 }
 
 function isPointWithinDistanceOfPoints(point, points, distance) {

@@ -226,7 +226,12 @@ export class Physics {
             const controlP = 1, controlD = 0.5;
             mesh.userData.velocity.z -= (controlP * mesh.position.z + controlD * mesh.userData.velocity.z) * dt;
         }
-        applyRotation(mesh, dt);
+        if (mesh.userData.velocityDecay) {
+            mesh.userData.velocity.multiplyScalar(Math.pow(mesh.userData.velocityDecay, dt));
+        }
+        if (mesh.userData.rotationalVelocity) {
+            applyRotation(mesh, dt);
+        }
     }
 
     /** Calls userData.handleCollision of colliding ammo.js bodies if available. */
@@ -255,11 +260,16 @@ export class Physics {
 
                 const velA = meshA.userData.physicsBody.getLinearVelocity();
                 const velB = meshB.userData.physicsBody.getLinearVelocity();
-                const impulseA = new THREE.Vector3(velA.x() - meshA.userData.velocity.x, velA.y() - meshA.userData.velocity.y, velA.z() - meshA.userData.velocity.z);
-                const impulseB = new THREE.Vector3(velB.x() - meshB.userData.velocity.x, velB.y() - meshB.userData.velocity.y, velB.z() - meshB.userData.velocity.z);
+                const deltaVelA = new THREE.Vector3(velA.x() - meshA.userData.velocity.x, velA.y() - meshA.userData.velocity.y, velA.z() - meshA.userData.velocity.z);
+                const deltaVelB = new THREE.Vector3(velB.x() - meshB.userData.velocity.x, velB.y() - meshB.userData.velocity.y, velB.z() - meshB.userData.velocity.z);
 
-                if (meshA.userData.handleCollision) { meshA.userData.handleCollision(meshB, contactPointA, impulseA, impulseB); }
-                if (meshB.userData.handleCollision) { meshB.userData.handleCollision(meshA, contactPointB, impulseB, impulseA); }
+                const rotVelA = meshA.userData.physicsBody.getAngularVelocity();
+                const rotVelB = meshB.userData.physicsBody.getAngularVelocity();
+                const deltaRotVelA = new THREE.Vector3(rotVelA.x() - meshA.userData.rotationalVelocity.x, rotVelA.y() - meshA.userData.rotationalVelocity.y, rotVelA.z() - meshA.userData.rotationalVelocity.z);
+                const deltaRotVelB = new THREE.Vector3(rotVelB.x() - meshB.userData.rotationalVelocity.x, rotVelB.y() - meshB.userData.rotationalVelocity.y, rotVelB.z() - meshB.userData.rotationalVelocity.z);
+
+                if (meshA.userData.handleCollision) { meshA.userData.handleCollision(meshB, contactPointA, deltaVelA, deltaVelB, deltaRotVelA, deltaRotVelB); }
+                if (meshB.userData.handleCollision) { meshB.userData.handleCollision(meshA, contactPointB, deltaVelB, deltaVelA, deltaRotVelB, deltaRotVelA); }
             }
         }
     }

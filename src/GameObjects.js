@@ -4,8 +4,10 @@ import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import { createAsteroid, createAsteroidGeometry, createDummyAsteroid } from './world/Asteroid.js';
 import { Universe } from './world/Universe.js';
 import { ParticleSystem } from './Particles.js';
+import { createDebris } from './world/Debris.js';
 import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
 import { Physics } from './Physics.js';
+import { Sounds } from './Sounds.js';
 
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -19,10 +21,14 @@ export class World {
      * @param {THREE.WebGLRenderer} renderer Renderer reference for the nebula generator.
      * @param {THREE.DepthTexture} depthTexture Main scene depth buffer for the particle renderer.
      */
-    constructor(renderer, depthTexture, asteroidExplosionVolume = 0.15, asteroidRemovalDistance = 60) {
-        this.asteroidExplosionVolume = asteroidExplosionVolume;
-        this.asteroidRemovalDistance = asteroidRemovalDistance;
+    constructor(renderer, depthTexture) {
+        this.asteroidExplosionVolume = 0.15;
+        this.asteroidRemovalDistance = 60;
+        this.debrisTakeDistance = 3.5;
+        this.debrisTakeDuration = 1.0;
+        this.debrisTakeFinishDistance = 0.4;
 
+        this.time = 0;
         this.physics = new Physics();
         this.scene = new THREE.Scene();
         this.clearColor = new THREE.Color(0x000000);
@@ -34,11 +40,18 @@ export class World {
 
         this.asteroids = [];
         this.lasers = [];
+        this.debris = [];
         this.particles = new ParticleSystem(this.scene, this.camera, depthTexture);
+        this.sounds = new Sounds();
 
         this.splitWorker = new AsteroidSplitWorker();
         /** Handles worker results. */
         this.splitWorker.onmessage = (message) => { this.handleSplitWorkerResponse(message); };
+    }
+
+    updateTime(dt) {
+        this.time += dt;
+        this.sounds.updateTime(this.time);
     }
 
     createCamera() {
@@ -46,7 +59,12 @@ export class World {
         camera.position.set(0, 0, 10);
         camera.up.set(0, 1, 0);
         camera.lookAt(0, 0, 0);
-        camera.userData.slackPerSecond = 0.001;
+        camera.userData = {
+            slackPerSecond: 0.001,
+            shake: 0,
+            maxShake: 0.1,
+            shakeDecay: 0.05,
+        }
         return camera;
     }
 
@@ -124,17 +142,34 @@ export class World {
      * @param {number} physicsEaseInSeconds Time spent in "ease-in" physics group, in which collisions with each other are disabled.
      */
     addAsteroid(asteroid, physicsEaseInSeconds = 0) {
+        const COLLISION_DAMAGE = 11; // Multiplier
+
         // Add collision handling
-        asteroid.userData.handleCollision = (otherMesh, contactPoint, impulse, otherImpulse) => {
+        asteroid.userData.handleCollision = (otherMesh, contactPoint, deltaVel, otherDeltaVel, deltaRotVel, otherDeltaRotVel) => {
             if (otherMesh.userData.type != "asteroid") { return; }
-            if (impulse.x == 0 && impulse.y == 0 && impulse.z == 0) { return; }
-            const damage = 25 * otherMesh.userData.volume * impulse.length();
+
+            const magnitude = deltaVel.length() + deltaRotVel.length();
+            if (magnitude < 0.1) { return; }
+
+            const damage = COLLISION_DAMAGE * otherMesh.userData.volume * magnitude;
             asteroid.userData.health -= damage;
             // console.log("Inflicting collision damage: " + damage + " health left: " + asteroid.userData.health);
+
+            // Play sound once
+            if (asteroid.userData.volume > otherMesh.userData.volume) {
+                const totalMagnitude = magnitude + otherDeltaVel.length() + otherDeltaRotVel.length() + asteroid.userData.volume + otherMesh.userData.volume;
+                const distance = contactPoint.clone().sub(new THREE.Vector3(this.camera.position.x, this.camera.position.y, 0)).length();
+                const volume = Math.max(0, Math.min(1, 0.1 * totalMagnitude)) * Math.exp(-0.5 * Math.max(0, distance - 10));
+                const pan = Math.max(-1, Math.min(1, (contactPoint.x - this.camera.position.x) / 15));
+                if (volume > 0.0005) { this.sounds.play("asteroidCollision", { volume, pan }); }
+                console.log("Collision volume: " + volume);
+            }
+
             this.particles.handleAsteroidCollision(asteroid, damage);
             if (asteroid.userData.health <= 0 && !asteroid.userData.isSplitting) {
                 const impact = { point: asteroid.position.clone().addScaledVector(otherMesh.position.clone().sub(asteroid.position).normalize(), 0.5 * asteroid.userData.diameter) };
                 impact.velocity = asteroid.position.clone().sub(impact.point).normalize();
+                impact.hitBy = "asteroid";
                 asteroid.userData.recentImpact = impact;
                 this.splitAsteroid(asteroid, impact);
             }
@@ -183,23 +218,77 @@ export class World {
                 a.userData.splitAge += dt;
             }
         });
-        this.asteroids = this.asteroids.filter(a => !a.isRemoved);
+        this.asteroids = this.asteroids.filter(a => !a.userData.isRemoved);
     }
 
     /**
-     * Explodes asteroid and grant the player materials.
+     * Explodes an asteroid and spawns debris ("material").
      */
     explodeAsteroid(asteroid) {
-        this.player.userData.material += asteroid.userData.materialValue * asteroid.userData.volume;
         this.particles.handleAsteroidExplosion(asteroid);
+        const numDebris = Math.floor(85 * asteroid.userData.volume);
+        const materialValue = asteroid.userData.materialValue * asteroid.userData.volume / numDebris;
+        for (let i = 0; i < numDebris; i++) {
+            const debris = createDebris(asteroid, materialValue, this.time);
+            this.physics.add(debris, undefined, false);
+            this.debris.push(debris);
+            this.scene.add(debris);
+        }
         this.removeAsteroid(asteroid);
     }
 
     removeAsteroid(asteroid) {
-        if (asteroid.isRemoved) { return; }
+        if (asteroid.userData.isRemoved) { return; }
         this.scene.remove(asteroid);
         this.physics.remove(asteroid);
-        asteroid.isRemoved = true;
+        asteroid.userData.isRemoved = true;
+    }
+
+    /** Handles material pickup. */
+    updateDebris(dt) {
+        const takeDistSq = this.debrisTakeDistance * this.debrisTakeDistance;
+        const takeFinishDistSq = this.debrisTakeFinishDistance * this.debrisTakeFinishDistance;
+        for (const debris of this.debris) {
+            if (debris.userData.takeProgress === null) {
+                // Idle
+                const offset = new THREE.Vector2(debris.position.x, debris.position.y).sub(new THREE.Vector2(this.player.position.x, this.player.position.y));
+                if (offset.lengthSq() < takeDistSq) {
+                    // Initiate being sucked in
+                    this.physics.remove(debris);
+                    debris.userData.takeProgress = 0;
+                    debris.userData.takeOriginalPosition = debris.position.clone();
+                    this.sounds.play("suck", { pitch: 1 + 0.2 * (Math.random() - 0.5) }, 0.07);
+                } else if (this.time > debris.userData.timestamp + debris.userData.ttl - debris.userData.fadeoutTime) {
+                    if (!debris.userData.isMaterialUnique) {
+                        debris.material = debris.material.clone();
+                        debris.material.transparent = true;
+                        debris.userData.isMaterialUnique = true;
+                    }
+                    if (this.time > debris.userData.timestamp + debris.userData.ttl) {
+                        // Discard
+                        this.scene.remove(debris);
+                        debris.userData.isRemoved = true;
+                    } else {
+                        // Fade out
+                        debris.material.opacity -= dt / debris.userData.fadeoutTime;
+                        debris.material.needs
+                    }
+                }
+            } else if (debris.userData.takeProgress >= 1 || debris.position.clone().sub(this.player.position).lengthSq() < takeFinishDistSq) {
+                // Collect
+                this.player.userData.material += debris.userData.materialValue;
+                this.scene.remove(debris);
+                debris.userData.isRemoved = true;
+                this.sounds.play("take", { pitch: 1.0 + 0.1 * (Math.random() - 0.5) }, 0.07);
+            } else {
+                // Suck in
+                debris.userData.takeProgress += dt / this.debrisTakeDuration;
+                const alpha = debris.userData.takeProgress * debris.userData.takeProgress;
+                const position = debris.userData.takeOriginalPosition.clone().multiplyScalar(1 - alpha).addScaledVector(this.player.position, alpha);
+                debris.position.copy(position);
+            }
+        }
+        this.debris = this.debris.filter(d => !d.userData.isRemoved);
     }
 
     updateUniverse() {
@@ -207,6 +296,8 @@ export class World {
     }
 
     createLaser(position, angle, speed, length = 0.5, radius = 0.02, ttl = 3, damage = 10) {
+        this.sounds.play("laser", { volume: 1, pitch: 1 + 0.1 * (Math.random() - 0.5)});
+
         const geo = new THREE.CylinderGeometry(radius, radius, length);
         geo.rotateZ(Math.PI / 2);
         const mat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
@@ -246,19 +337,27 @@ export class World {
             }
         });
 
-        this.lasers = this.lasers.filter(l => !l.isRemoved);
+        this.lasers = this.lasers.filter(l => !l.userData.isRemoved);
     }
 
     removeLaser(laser) {
-        if (laser.isRemoved) { return; }
+        if (laser.userData.isRemoved) { return; }
         this.scene.remove(laser);
         this.scene.remove(laser.userData.light);
-        laser.isRemoved = true;
+        laser.userData.isRemoved = true;
     }
 
     handleLaserHit(laser, asteroid, intersection) {
+        this.sounds.play("laserAsteroidImpact");
+
         asteroid.userData.health -= laser.userData.damage;
-        const impact = { point: intersection.point, velocity: laser.userData.velocity.clone(), normal: intersection.face.normal, farPoint: intersection.farPoint };
+        const impact = {
+            point: intersection.point,
+            velocity: laser.userData.velocity.clone(),
+            normal: intersection.face.normal,
+            farPoint: intersection.farPoint,
+            hitBy: "laser"
+        };
         asteroid.userData.recentImpact = impact;
         asteroid.userData.nibble(impact);
 
@@ -272,6 +371,7 @@ export class World {
 
     handlePlayerCollision() {
         this.particles.handlePlayerExplosion(this.player);
+        this.sounds.play("playerCollision");
         this.physics.disableAmmo(this.player);
         this.player.userData.isAlive = false;
         this.player.userData.speed = 0;
@@ -282,6 +382,7 @@ export class World {
     handleSplitWorkerResponse(message) {
         const parentAsteroid = this.asteroids.find((a) => a.uuid == message.data.parentUuid);
         const splitAsteroids = [];
+        let exploded = false;
         let sign = 1;
 
         message.data.splits.forEach((result) => {
@@ -338,6 +439,7 @@ export class World {
 
             if (mesh.userData.volume <= this.asteroidExplosionVolume) {
                 this.explodeAsteroid(mesh);
+                exploded = true;
             } else {
                 this.addAsteroid(mesh, 0.5);
             }
@@ -345,8 +447,18 @@ export class World {
         });
 
         this.removeAsteroid(parentAsteroid);
-
         this.particles.handleAsteroidSplit(parentAsteroid.userData.recentImpact, parentAsteroid, splitAsteroids[0]);
+
+        if (parentAsteroid.userData.recentImpact.hitBy == "laser") {
+            if (parentAsteroid.userData.volume > 0.175) {
+                this.camera.userData.shake += 0.02 * Math.sqrt(parentAsteroid.userData.volume);
+            }
+            if (exploded) {
+                this.sounds.play("asteroidExplosion");
+            } else {
+                this.sounds.play("asteroidSplit");
+            }
+        }
     }
 
     /** Provides dummy scenes with increasing number of lights to pre-compile shaders. */

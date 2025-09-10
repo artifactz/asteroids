@@ -47,6 +47,7 @@ export class GameController {
             this.state = GameState.Playing;
             this.isEaseInStage = true;
             showHud();
+            this.world.sounds.play("ambient", { loop: true });
 
         } else if (this.state == GameState.Playing && !this.world.player.userData.isAlive) {
             this.state = GameState.EndScreen;
@@ -87,6 +88,7 @@ export class GameController {
             }
         }
 
+        this.world.updateTime(dt);
         this.world.updatePlayer(dt);
 
         this.maybeSpawnAsteroid(dt);
@@ -102,6 +104,7 @@ export class GameController {
         this.world.physics.update(dt);
         this.world.updateAsteroids(dt);
         this.world.updateLasers(dt);
+        this.world.updateDebris(dt);
         this.world.particles.update(dt);
         this.updateCamera(mouse, dt);
         this.world.updateUniverse();
@@ -278,7 +281,7 @@ class CrashAsteroidBehavior /*extends Behavior*/ {
     }
 
     act(dt) {
-        if (this.target.isRemoved) { this.chooseTarget(); }
+        if (this.target.userData.isRemoved) { this.chooseTarget(); }
 
         const controlP = 0.02, controlD = 0.5;
         const offset = this.target.position.clone().sub(this.asteroid.position);
