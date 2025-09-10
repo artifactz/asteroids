@@ -11,32 +11,33 @@ const GameState = {
 
 const GameParameters = {
     numStartAsteroids: 4,
+    startAsteroidCooldown: 3.5,
     initialAsteroidSpawnProbability: 10.0,
     asteroidSpawnDistance: 32,
     asteroidSpawnProbabilityGainPerSecond: 0.15,
-    maxAsteroids: 100
+    maxAsteroids: 100,
+    startScreenPlayerSpeed: 40,
 }
 
 export class GameController {
     /**
      * @param {World} world 
-     * @param {number} startScreenPlayerSpeed 
      */
-    constructor(world, startScreenPlayerSpeed = 40) {
+    constructor(world) {
         this.world = world;
         this.prevState = null;
         this.state = GameState.StartScreen;
         this.isEaseInStage = false; // transition between StartScreen and Playing
         this.isStartAsteroidStage = false; // initial game stage in which to spawn an asteroid cluster
         this.startAsteroidAngles = []; // directions of already spawned asteroid clusters
+        this.startAsteroidHeat = 0;
         this.asteroidSpawnProbability = 10.0; // resets to 0 at every spawn
 
         // Prepare start screen
-        this.startScreenPlayerSpeed = startScreenPlayerSpeed;
         this.originalPlayerMaxSpeed = world.player.userData.maxSpeed;
         this.originalPlayerMaxRotationalSpeed = world.player.userData.maxRotationalSpeed;
-        world.player.userData.maxSpeed = startScreenPlayerSpeed;
-        world.player.userData.speed = startScreenPlayerSpeed;
+        world.player.userData.maxSpeed = GameParameters.startScreenPlayerSpeed;
+        world.player.userData.speed = GameParameters.startScreenPlayerSpeed;
         this.world.player.userData.maxRotationalSpeed = 0;
         world.player.rotation.z = 0.125 * Math.PI;
     }
@@ -58,7 +59,7 @@ export class GameController {
                 this.world.player.userData.speed *= decay;
 
                 const easeInEndSpeed = 0.5 * this.originalPlayerMaxSpeed;
-                const alpha = (this.world.player.userData.speed - easeInEndSpeed) / (this.startScreenPlayerSpeed - easeInEndSpeed);
+                const alpha = (this.world.player.userData.speed - easeInEndSpeed) / (GameParameters.startScreenPlayerSpeed - easeInEndSpeed);
                 this.world.player.userData.maxRotationalSpeed = (1 - alpha) * this.originalPlayerMaxRotationalSpeed;
 
                 if (this.world.player.userData.speed <= 0.5 * this.originalPlayerMaxSpeed) {
@@ -74,6 +75,13 @@ export class GameController {
                 } else if (keys['s']) {
                     this.world.player.userData.accel = -this.world.player.userData.maxAccel;
                 } else {
+                    // Decelerate at half power
+                    const delta = 0.5 * this.world.player.userData.maxAccel * dt;
+                    if (Math.abs(this.world.player.userData.speed) < delta) {
+                        this.world.player.userData.speed = 0;
+                    } else {
+                        this.world.player.userData.speed -= Math.sign(this.world.player.userData.speed) * delta;
+                    }
                     this.world.player.userData.accel = 0;
                 }
             }
@@ -125,8 +133,9 @@ export class GameController {
         if (this.state != GameState.Playing || this.isEaseInStage) { return; }
 
         if (this.isStartAsteroidStage) {
+            // TODO might get surrounded this way...
             const angle = this.world.player.rotation.z;
-            if (this.isStartAsteroidAngleAvailable(angle)) {
+            if (this.startAsteroidHeat <= 0 && this.isStartAsteroidAngleAvailable(angle)) {
                 for (const deltaAngle of linspace(-0.1 * Math.PI, 0.1 * Math.PI, GameParameters.numStartAsteroids)) {
                     const position = this.world.player.position.clone().add(new THREE.Vector3(
                         GameParameters.asteroidSpawnDistance * Math.cos(angle + deltaAngle),
@@ -137,16 +146,18 @@ export class GameController {
                     this.world.spawnAsteroid(position, velocity);
                 }
                 this.startAsteroidAngles.push(angle);
+                this.startAsteroidHeat = GameParameters.startAsteroidCooldown;
             }
 
             const disableStartAsteroidsDistance = GameParameters.asteroidSpawnDistance / 2;
             for (const asteroid of this.world.asteroids) {
                 if (asteroid.position.clone().sub(this.world.player.position).lengthSq() < disableStartAsteroidsDistance * disableStartAsteroidsDistance) {
                     this.isStartAsteroidStage = false;
-                    console.log("End of start asteroids");
                     break;
                 }
             }
+
+            this.startAsteroidHeat -= dt;
 
             // Don't spawn random asteroids
             return;
@@ -308,8 +319,19 @@ function getOrthogonalCollisionTrajectory(player, distance, speed) {
     // t^2 == r^2 / (x^2 + y^2 + s^2)
     // => t == sqrt(r^2 / (x^2 + y^2 + s^2))
 
-    // So we can calculate the collision time
     const v = player.userData.velocity;
+
+    // Just spawn in any direction when player doesn't move
+    if (v.lengthSq() < 0.1) {
+        const angle = Math.random() * 2 * Math.PI;
+        const direction = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+        return {
+            position: player.position.clone().addScaledVector(direction, distance),
+            velocity: direction.clone().multiplyScalar(-speed)
+        }
+    }
+
+    // We can calculate the collision time
     const t = Math.sqrt(distance * distance / (v.x * v.x + v.y * v.y + speed * speed));
 
     // And thus the collision point
