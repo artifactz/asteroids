@@ -38,15 +38,56 @@ export function rotateTowards(actor, point, dt) {
 }
 
 
+/**
+ * Steers camera towards the point between player and cursor, and slightly towards nearby asteroids.
+ * Handles camera shake.
+ */
 export function moveCamera(world, aimPoint, dt) {
     const destination = new THREE.Vector2(
         0.5 * (world.player.position.x + aimPoint.x),
         0.5 * (world.player.position.y + aimPoint.y)
     );
+
+    // Steer camera towards nearby asteroids
+    if (world.asteroids.length > 0) {
+        // TODO add more weight to asteroids closing in on us
+        const asteroidPull = 6;
+        const distanceCutoff = 2;
+        const distanceFallofoff = 0.25;
+
+        const weights = world.asteroids.map(
+            (a) => Math.exp(-distanceFallofoff * Math.max(0, world.player.position.clone().sub(a.position).length() - distanceCutoff))
+        );
+        const weightsIter = weights.values();
+        const weightedSum = world.asteroids
+            .map((a) => a.position)
+            .reduce((a, b) => a.addScaledVector(new THREE.Vector2(b.x, b.y).sub(destination), weightsIter.next().value), new THREE.Vector2());
+        const weightsTotal = weights.reduce((a, b) => a + b, 0);
+        const asteroidsMean = weightedSum.multiplyScalar(1 / (weightsTotal * world.asteroids.length));
+        asteroidsMean.multiplyScalar(1 - Math.exp(-asteroidPull * weightsTotal));
+        const norm = asteroidsMean.length();
+        if (norm > 5) { asteroidsMean.multiplyScalar(5 / norm); }
+        if (world.camera.userData.lastAsteroidsMean) {
+            const beta = Math.pow(0.5, dt);
+            asteroidsMean.multiplyScalar(1 - beta).addScaledVector(world.camera.userData.lastAsteroidsMean, beta);
+        }
+        destination.add(asteroidsMean);
+        world.camera.userData.lastAsteroidsMean = asteroidsMean;
+    }
+
     const alpha = Math.pow(world.camera.userData.slackPerSecond, dt);
+    destination.x = (1 - alpha) * destination.x + alpha * world.camera.position.x;
+    destination.y = (1 - alpha) * destination.y + alpha * world.camera.position.y;
+
+    if (world.camera.userData.shake) {
+        world.camera.userData.shake = Math.max(0, Math.min(world.camera.userData.maxShake, world.camera.userData.shake) - world.camera.userData.shakeDecay * dt);
+        destination.x += world.camera.userData.shake * Math.cos(0.0587 * Date.now());
+        destination.y += world.camera.userData.shake * Math.sin(0.0412 * Date.now());
+    }
+
     world.camera.position.set(
-        (1 - alpha) * destination.x + alpha * world.camera.position.x,
-        (1 - alpha) * destination.y + alpha * world.camera.position.y,
+        destination.x,
+        destination.y,
         world.camera.position.z
     );
 }
