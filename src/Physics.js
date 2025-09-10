@@ -142,13 +142,23 @@ export class Physics {
 
         const transform = new Ammo.btTransform();
         transform.setIdentity();
-        transform.setOrigin(new Ammo.btVector3(this.player.position.x, this.player.position.y, this.player.position.z));
+        const playerPosition = new Ammo.btVector3(this.player.position.x, this.player.position.y, this.player.position.z);
+        transform.setOrigin(playerPosition);
         const quaternion = new THREE.Quaternion().setFromEuler(this.player.rotation);
-        transform.setRotation(new Ammo.btQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w));
-        this.player.userData.physicsBody.setMotionState(new Ammo.btDefaultMotionState(transform));
-        this.player.userData.physicsBody.setLinearVelocity(new Ammo.btVector3(this.player.userData.velocity.x, this.player.userData.velocity.y, this.player.userData.velocity.z));
-        this.player.userData.physicsBody.setAngularVelocity(new Ammo.btVector3(this.player.userData.rotationalVelocity.x, this.player.userData.rotationalVelocity.y, this.player.userData.rotationalVelocity.z));
+        const playerRotation = new Ammo.btQuaternion(quaternion.x, quaternion.y, quaternion.z, quaternion.w);
+        transform.setRotation(playerRotation);
+        const motionState = new Ammo.btDefaultMotionState(transform);
+        this.player.userData.physicsBody.setMotionState(motionState);
+        const playerVelocity = new Ammo.btVector3(this.player.userData.velocity.x, this.player.userData.velocity.y, this.player.userData.velocity.z);
+        this.player.userData.physicsBody.setLinearVelocity(playerVelocity);
+        const playerAngularVelocity = new Ammo.btVector3(this.player.userData.rotationalVelocity.x, this.player.userData.rotationalVelocity.y, this.player.userData.rotationalVelocity.z);
+        this.player.userData.physicsBody.setAngularVelocity(playerAngularVelocity);
+        // Ammo.destroy(motionState);  // causes error during stepSimulation
         Ammo.destroy(transform);
+        Ammo.destroy(playerPosition);
+        Ammo.destroy(playerRotation);
+        Ammo.destroy(playerVelocity);
+        Ammo.destroy(playerAngularVelocity);
     }
 
     movePlayer(dt) {
