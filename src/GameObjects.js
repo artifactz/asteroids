@@ -55,7 +55,7 @@ export class World {
     }
 
     createCamera() {
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 5, 1000);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1000);
         camera.position.set(0, 0, 10);
         camera.up.set(0, 1, 0);
         camera.lookAt(0, 0, 0);
@@ -161,8 +161,7 @@ export class World {
                 const distance = contactPoint.clone().sub(new THREE.Vector3(this.camera.position.x, this.camera.position.y, 0)).length();
                 const volume = Math.max(0, Math.min(1, 0.1 * totalMagnitude)) * Math.exp(-0.5 * Math.max(0, distance - 10));
                 const pan = Math.max(-1, Math.min(1, (contactPoint.x - this.camera.position.x) / 15));
-                if (volume > 0.0005) { this.sounds.play("asteroidCollision", { volume, pan }); }
-                console.log("Collision volume: " + volume);
+                if (volume > 0.01) { this.sounds.play("asteroidCollision", { volume, pan }); }
             }
 
             this.particles.handleAsteroidCollision(asteroid, damage);
@@ -252,7 +251,7 @@ export class World {
             if (debris.userData.takeProgress === null) {
                 // Idle
                 const offset = new THREE.Vector2(debris.position.x, debris.position.y).sub(new THREE.Vector2(this.player.position.x, this.player.position.y));
-                if (offset.lengthSq() < takeDistSq) {
+                if (this.player.userData.isAlive && offset.lengthSq() < takeDistSq) {
                     // Initiate being sucked in
                     this.physics.remove(debris);
                     debris.userData.takeProgress = 0;
@@ -260,6 +259,7 @@ export class World {
                     this.sounds.play("suck", { pitch: 1 + 0.2 * (Math.random() - 0.5) }, 0.07);
                 } else if (this.time > debris.userData.timestamp + debris.userData.ttl - debris.userData.fadeoutTime) {
                     if (!debris.userData.isMaterialUnique) {
+                        // Initialize material for fade out
                         debris.material = debris.material.clone();
                         debris.material.transparent = true;
                         debris.userData.isMaterialUnique = true;
