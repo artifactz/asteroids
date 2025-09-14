@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { SSAARenderPass } from 'three/examples/jsm/postprocessing/SSAARenderPass.js';
 import { getMousePositionAtZ } from './Targeting';
 import { World } from './GameObjects';
 import { SmokeLighting, Blend } from './PostProcessing';
@@ -26,7 +27,7 @@ const fps = {
     }
 }
 
-const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three-canvas') }); // { antialias: true }
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three-canvas'), antialias: false });
 renderer.autoClear = false;
 renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -34,7 +35,6 @@ initHud();
 
 // Off-screen render target used to access main scene depth buffer
 const renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
-    samples: 8,
     format: THREE.RGBAFormat,
     type: THREE.HalfFloatType,
     depthBuffer: true,
@@ -47,6 +47,7 @@ const world = new World(renderer, renderTarget.depthTexture);
 
 const blend = new Blend(THREE.NormalBlending);
 const smokeLighting = new SmokeLighting();
+const ssaa = new SSAARenderPass(world.scene, world.camera);
 
 const controller = new GameController(world);
 
@@ -61,11 +62,12 @@ window.addEventListener('mouseup', e => { e.preventDefault(); mouse[e.button] = 
 window.addEventListener('mouseclick', e => { e.preventDefault(); });
 window.addEventListener('contextmenu', e => { e.preventDefault(); });
 window.addEventListener('resize', () => {
-    world.camera.aspect = window.innerWidth / window.innerHeight;
+    const [w, h] = [window.innerWidth, window.innerHeight];
+    world.camera.aspect = w / h;
     world.camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderTarget.setSize(window.innerWidth, window.innerHeight);
-    smokeLighting.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(w, h);
+    renderTarget.setSize(w, h);
+    smokeLighting.setSize(w, h);
 });
 
 /** Renders world scene and lit smoke. */
@@ -73,7 +75,8 @@ function render(scene, camera) {
     renderer.setRenderTarget(renderTarget);
     renderer.setClearColor(world.clearColor);
     renderer.clear();
-    renderer.render(scene, camera);
+    // Render main scene layer to renderTarget using super-sampling AA (readBuffer argument is only used for buffer sizes)
+    ssaa.render(renderer, renderTarget, renderTarget);
 
     renderer.setRenderTarget(null);
     blend.render(renderer, renderTarget.texture);
