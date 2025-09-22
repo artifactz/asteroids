@@ -57,8 +57,8 @@ const mouse = {};
 window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
-window.addEventListener('mousedown', e => { e.preventDefault(); mouse[e.button] = true; });
-window.addEventListener('mouseup', e => { e.preventDefault(); mouse[e.button] = false; });
+window.addEventListener('mousedown', e => { e.preventDefault(); mouse[e.button] = true; mouse.x = e.clientX; mouse.y = e.clientY; });
+window.addEventListener('mouseup', e => { e.preventDefault(); mouse[e.button] = false; mouse.x = e.clientX; mouse.y = e.clientY; });
 window.addEventListener('mouseclick', e => { e.preventDefault(); });
 window.addEventListener('contextmenu', e => { e.preventDefault(); });
 window.addEventListener('resize', () => {
@@ -68,6 +68,7 @@ window.addEventListener('resize', () => {
     renderer.setSize(w, h);
     renderTarget.setSize(w, h);
     smokeLighting.setSize(w, h);
+    ssaa.setSize(w, h);
 });
 
 /** Renders world scene and lit smoke. */
