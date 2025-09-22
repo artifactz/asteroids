@@ -113,7 +113,7 @@ export class GameController {
         if (this.state == GameState.Playing) {
             const thrust = (this.isEaseInStage)
                 ? 0.5 + 0.5 * this.world.player.userData.speed / this.world.player.userData.maxSpeed
-                : Math.abs(this.world.player.userData.speed) / this.world.player.userData.maxSpeed;
+                : this.world.player.userData.speed / this.world.player.userData.maxSpeed;
             updateThrustBar(thrust);
             updateMaterial(this.world.player.userData.material);
         }

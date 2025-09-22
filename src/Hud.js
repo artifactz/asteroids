@@ -23,11 +23,25 @@ export function initHud() {
     }
 }
 
+let lastThrustSegments = null;
+
 export function updateThrustBar(value) {
-    const activeCount = Math.round(value * THRUST_NUM_SEGMENTS);
-    thrustSegments.forEach((segment, index) => {
-        segment.classList.toggle('active', index < activeCount);
-    });
+    const absValue = Math.abs(value);
+    const activeCount = Math.round(absValue * THRUST_NUM_SEGMENTS);
+    if (activeCount != lastThrustSegments) {
+        thrustSegments.forEach((segment, index) => {
+            segment.classList.toggle('fulldrive', activeCount == THRUST_NUM_SEGMENTS && value > 0);
+            segment.classList.toggle('fullreverse', activeCount == THRUST_NUM_SEGMENTS && value < 0);
+            if (index < activeCount) {
+                segment.classList.toggle((value > 0) ? 'drive' : 'reverse', true);
+            } else {
+                segment.classList.toggle('drive', false);
+                segment.classList.toggle('reverse', false);
+
+            }
+        });
+        lastThrustSegments = activeCount;
+    }
 }
 
 

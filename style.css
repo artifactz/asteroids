@@ -45,45 +45,58 @@ body {
   margin: 2px 0;
   background: rgba(255, 255, 255, 0.1);
   border-radius: 2px;
-  transition: background 0.333s;
+  transition: background 0.333s,
+              box-shadow 0.7s;
 }
 
-.thrust-segment.active {
-  background: #36b4ff;
+.thrust-segment.drive {
+  background: #36b4ffcc;
+}
+
+.thrust-segment.fulldrive {
+  box-shadow: 0 0 3px 0.2px #36b4ff;
+}
+
+.thrust-segment.reverse {
+  background: #FFA93699;
+}
+
+.thrust-segment.fullreverse {
+  box-shadow: 0 0 3px 0.2px #FFA936bb;
 }
 
 #game-start-container {
   display: none;
   position: absolute;
   bottom: 50%;
-  left: 0px;
-  width: 100%;
-  transform: translateY(50%);
+  right: 50%;
+  transform: translateX(50%) translateY(50%) scale(69);
   align-items: center;
   opacity: 0;
+  clip-path: inset(0 0 0 0);
 
-  transition: opacity 2s ease,
-    display 2s ease allow-discrete;
+  transition: opacity 4s ease,
+    display 4s ease allow-discrete,
+    transform 4s cubic-bezier(1.0, 0, 1.0, 1.0);
 
   &.visible {
     opacity: 1;
     display: block;
-    transition: opacity 2s 1s ease,
-      display 2s 1s ease allow-discrete;
+    transform: translateX(50%) translateY(50%) scale(1);
+    transition: opacity 2.5s 1s linear,
+      display 2s 1s ease allow-discrete,
+      clip-path 0.7s 0.95s linear;
   }
 }
 
 #game-start-text {
-  width: 100%;
-  font-size: 128px;
-  text-align: center;
+  font-size: 12vw;
   color: #36b4ffb9;
-  text-shadow: -5px -5px 0px #0007;
+  text-shadow: -0.5vw -0.5vw 0px #0005;
 }
 
 #start-text {
-  width: 100%;
-  font-size: 24px;
+  font-size: 1.93vw;
   text-align: center;
   color: #36b4ff;
 }
@@ -125,20 +138,22 @@ body {
 
 #game-over-text {
   width: 100%;
-  font-size: 128px;
+  font-size: 12vw;
   text-align: center;
-  color: #f44741b9;
+  color: #f44741a6;
+  text-shadow: -2px -2px 0px #0005;
 }
 
 #restart-text {
   width: 100%;
-  font-size: 24px;
+  font-size: 1.93vw;
   text-align: center;
   color: #f44741;
 }
 
 @starting-style {
   #game-start-container.visible {
+    clip-path: inset(0 100% 0 0);
     opacity: 0;
   }
   #game-over-container.visible {
