@@ -98,7 +98,7 @@ export class World {
             laserSpreadRad: 0.01 * Math.PI,
             laserSpeed: 16,
             rotationalVelocity: new THREE.Vector3(0, 0, 0),
-            mass: 0.18,
+            mass: 0.8,
             isAlive: true,
             material: 0.0,
         }
