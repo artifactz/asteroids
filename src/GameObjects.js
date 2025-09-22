@@ -225,14 +225,19 @@ export class World {
      */
     explodeAsteroid(asteroid) {
         this.particles.handleAsteroidExplosion(asteroid);
-        const numDebris = Math.floor(85 * asteroid.userData.volume);
+
+        // Spawn more debris objects when asteroid was shot down by player (but same total value)
+        const isHeroic = asteroid.userData.recentImpact.hitBy == "laser";
+        const numDebris = 1 + Math.floor(20 * ((isHeroic) ? 4 : 1) * asteroid.userData.volume);
         const materialValue = asteroid.userData.materialValue * asteroid.userData.volume / numDebris;
+
         for (let i = 0; i < numDebris; i++) {
             const debris = createDebris(asteroid, materialValue, this.time);
             this.physics.add(debris, undefined, false);
             this.debris.push(debris);
             this.scene.add(debris);
         }
+
         this.removeAsteroid(asteroid);
     }
 
