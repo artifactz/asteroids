@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { computeMeshVolume } from 'three-bvh-csg';
-import { SUBTRACTION, Brush, Evaluator } from 'three-bvh-csg';
-import { GeometryManipulator, simplifyGeometry, printDuplicateTriangles, printCollapsedTriangles } from '../GeometryUtils.js';
+import { SUBTRACTION, Brush, Evaluator, computeMeshVolume } from 'three-bvh-csg';
+import { splitEdgesAtVertices } from '../geometry/EdgeSplitter.js';
+import { removeCollapsedTriangles } from '../GeometryUtils.js';
 
 
 const shaderAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1.0 });
@@ -46,8 +46,7 @@ export function createAsteroidGeometry(radius = 0.9) {
     let geo = new THREE.IcosahedronGeometry(radius, 2);
     geo.deleteAttribute('normal');
     geo.deleteAttribute('uv');
-    // TODO replace with simplifyGeometry / reduce tolerance
-    geo = BufferGeometryUtils.mergeVertices(geo, 0.09);
+    geo = BufferGeometryUtils.mergeVertices(geo, 0.0001);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
         const v = new THREE.Vector3().fromBufferAttribute(pos, i);
@@ -62,6 +61,7 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
     geometry.computeVertexNormals();
     addBarycentricCoordinates(geometry);
 
+    geometry.computeBoundingBox();
     geometry.computeBoundingSphere();
     const mesh = new THREE.Mesh(geometry, shaderAsteroidMat);
     const volume = computeMeshVolume(mesh);
@@ -79,7 +79,7 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
         splitAge: null,
         type: "asteroid",
 
-        nibble(impact) { nibbleAsteroid(mesh, impact); }
+        bite(impact) { biteAsteroid(mesh, impact); }
     };
 
     Object.defineProperty(mesh.userData, "isSplitting", { get: function () { return mesh.userData.splitAge !== null; } });
@@ -105,48 +105,40 @@ function addBarycentricCoordinates(geometry) {
 }
 
 
-const nibbleRadius = 0.25;
-const nibbleDepth = 0.07;
-const nibbleGeometry = new THREE.IcosahedronGeometry(nibbleRadius, 0);
-const nibbleBrush = new Brush(nibbleGeometry);
-const nibbleEvaluator = new Evaluator();
-nibbleEvaluator.attributes = ["position"];
+const biteRadius = 0.3;
+const biteDepth = 0.1;
+const biteGeometry = new THREE.IcosahedronGeometry(biteRadius, 0);
+const biteBrush = new Brush(biteGeometry);
+const biteEvaluator = new Evaluator();
+biteEvaluator.attributes = ["position"];
 
 /**
  * Subtracts a low-detail sphere from the geometry around the impact area.
  * @param {THREE.Mesh} asteroid 
  * @param {Object} impact Impact object with a point and a velocity.
  */
-function nibbleAsteroid(asteroid, impact, rx = null, ry = null, rz = null) {
-    const brush1 = new Brush(asteroid.geometry);
-    // const brush2 = new Brush(defaultNibbleGeometry);
+export function biteAsteroid(asteroid, impact, rx = null, ry = null, rz = null) {
+    // TODO intersect and use surface sampler on result to create particles
+    const asteroidBrush = new Brush(asteroid.geometry);
     const negativeNormalizedImpact = impact.velocity.clone().normalize().multiplyScalar(-1);
-    nibbleBrush.position.copy(asteroid.worldToLocal(
-        impact.point.clone().add(negativeNormalizedImpact.multiplyScalar(nibbleRadius - nibbleDepth))
+    biteBrush.position.copy(asteroid.worldToLocal(
+        impact.point.clone().add(negativeNormalizedImpact.multiplyScalar(biteRadius - biteDepth))
     ));
     rx = rx || Math.random() * 2 * Math.PI;
     ry = ry || Math.random() * 2 * Math.PI;
     rz = rz || Math.random() * 2 * Math.PI;
 
-    nibbleBrush.rotation.set(rx, ry, rz);
-    nibbleBrush.updateMatrixWorld();
+    biteBrush.rotation.set(rx, ry, rz);
+    biteBrush.updateMatrixWorld();
 
-    const result = nibbleEvaluator.evaluate(brush1, nibbleBrush, SUBTRACTION);
+    const result = biteEvaluator.evaluate(asteroidBrush, biteBrush, SUBTRACTION);
     let geo = result.geometry;
 
-    // printDuplicateTriangles(geo);
-
-    simplifyGeometry(geo, 0.0001);
-
-    // printDuplicateTriangles(geo);
-
-    geo = new GeometryManipulator(geo).splitTrianglesOnTouchingVertices();
-
-    // printDuplicateTriangles(geo);  // <-- TODO this happens
-
-    simplifyGeometry(geo, 0.04);
-
-    // printDuplicateTriangles(geo);
+    geo = BufferGeometryUtils.mergeVertices(geo, 0.0001);
+    removeCollapsedTriangles(geo);
+    geo = splitEdgesAtVertices(geo);
+    geo = BufferGeometryUtils.mergeVertices(geo, 0.04);
+    removeCollapsedTriangles(geo);
 
     geo = geo.toNonIndexed();
     geo.computeVertexNormals();

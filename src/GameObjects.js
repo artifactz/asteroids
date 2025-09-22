@@ -188,22 +188,15 @@ export class World {
 
         asteroid.userData.splitAge = 0;
 
-        const rotVelWorld = new THREE.Vector3(asteroid.userData.rotationalVelocity.x, asteroid.userData.rotationalVelocity.y, asteroid.userData.rotationalVelocity.z);
-        // const rotMat = new THREE.Matrix4().makeRotationFromEuler(asteroid.rotation);
-        // asteroid.localToWorld(rotVelWorld);
-        rotVelWorld.applyEuler(asteroid.rotation);
-
         this.splitWorker.postMessage({
             asteroid: {
                 uuid: asteroid.uuid,
                 position: {x: asteroid.position.x, y: asteroid.position.y, z: asteroid.position.z},
                 rotation: {x: asteroid.rotation.x, y: asteroid.rotation.y, z: asteroid.rotation.z},
-                rotationalVelocityWorld: {x: rotVelWorld.x, y: rotVelWorld.y, z: rotVelWorld.z},
                 diameter: asteroid.userData.diameter,
                 vertexArray: asteroid.geometry.attributes.position.array,
-                normalArray: asteroid.geometry.attributes.normal.array,
             },
-            impact
+            impact: { point: impact.point, velocity: impact.velocity }
         });
     }
 
@@ -364,7 +357,7 @@ export class World {
             hitBy: "laser"
         };
         asteroid.userData.recentImpact = impact;
-        asteroid.userData.nibble(impact);
+        asteroid.userData.bite(impact);
 
         this.particles.handleLaserAsteroidImpact(impact, asteroid);
         this.removeLaser(laser);
@@ -427,13 +420,13 @@ export class World {
             const randomRotation = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
             const outwardWeight = 0.2;
             const outwardRotatation = new THREE.Vector3(-rotation.elements[2], -rotation.elements[6], -rotation.elements[10]);
-            mesh.userData.rotationalVelocity = new THREE.Vector3(
-                // TODO seeemingly results in arbitrary looking rotations (particularly for collided asteroids)
-                message.data.parentRotationalVelocityWorld.x,
-                message.data.parentRotationalVelocityWorld.y,
-                message.data.parentRotationalVelocityWorld.z
-            )
-                .multiplyScalar(parentWeight)
+            const parentRotVel = new THREE.Vector3(parentAsteroid.userData.rotationalVelocity.x, parentAsteroid.userData.rotationalVelocity.y, parentAsteroid.userData.rotationalVelocity.z);
+            parentRotVel.applyEuler(parentAsteroid.rotation);
+            // TODO rotations sometimes look kind of arbitrary (particularly for collided asteroids)
+            // parentAsteroid.localToWorld(parentRotVel);
+            // parentRotVel.applyMatrix4(new THREE.Matrix4().makeRotationFromEuler(parentAsteroid.rotation));
+            mesh.userData.rotationalVelocity = new THREE.Vector3()
+                .addScaledVector(parentRotVel, parentWeight)
                 .addScaledVector(randomRotation, randomWeight)
                 .addScaledVector(outwardRotatation, outwardWeight * sign);
 
