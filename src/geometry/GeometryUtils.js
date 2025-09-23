@@ -144,3 +144,15 @@ export function removeCollapsedTriangles(geometry, verbose = false) {
     geometry.setIndex(newIndex);
     if (verbose && removed) { console.log(`Removed ${removed} collapsed triangles`); }
 }
+
+/**
+ * Generates barycentric coords for every triangle.
+ */
+export function addBarycentricCoordinates(geometry) {
+    const count = geometry.attributes.position.count;  // vertex count
+    const bary = new Float32Array(count * 3);
+    for (let i = 0; i < count; i += 3) {
+        bary.set([1,0,0,  0,1,0,  0,0,1], i * 3);
+    }
+    geometry.setAttribute("barycentric", new THREE.BufferAttribute(bary, 3));
+}

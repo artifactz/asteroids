@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SurfaceSampler, getRotatedPointVelocity, iteratePoints, pointToLineDistanceSquared } from './GeometryUtils.js';
+import { SurfaceSampler, getRotatedPointVelocity, iteratePoints, pointToLineDistanceSquared } from './geometry/GeometryUtils.js';
 
 
 /**
@@ -356,15 +356,6 @@ export class ParticleSystem {
                 );
             }
             pos.needsUpdate = true;
-
-            // if (particles.userData.velocityDecay != 1) {
-            //     // decay velocity
-            //     const decay = Math.pow(particles.userData.velocityDecay, dt);
-            //     for (let i = 0; i < vel.count; i++) {
-            //         vel.setXYZ(i, decay * vel.getX(i), decay * vel.getY(i), decay * vel.getZ(i));
-            //     }
-            //     vel.needsUpdate = true;
-            // }
 
             particles.userData.age += dt;
 

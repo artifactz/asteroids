@@ -1,14 +1,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
-import { createAsteroid, createAsteroidGeometry, createDummyAsteroid } from './world/Asteroid.js';
-import { Universe } from './world/Universe.js';
-import { ParticleSystem } from './Particles.js';
-import { createDebris } from './world/Debris.js';
-import AsteroidSplitWorker from './workers/AsteroidSplitWorker.js?worker';
-import { Physics } from './Physics.js';
-import { Sounds } from './Sounds.js';
+import { createAsteroid, createAsteroidGeometry, createDummyAsteroid } from './Asteroid.js';
+import { Universe } from './Universe.js';
+import { ParticleSystem } from '../Particles.js';
+import { createDebris } from './Debris.js';
+import AsteroidSplitWorker from '../workers/AsteroidSplitWorker.js?worker';
+import AsteroidBiteWorker from '../workers/AsteroidBiteWorker.js?worker';
+import { Physics } from '../Physics.js';
+import { Sounds } from '../Sounds.js';
+import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
 
+// Set up accelerated laser/asteroid collision detection
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
@@ -45,8 +48,9 @@ export class World {
         this.sounds = new Sounds();
 
         this.splitWorker = new AsteroidSplitWorker();
-        /** Handles worker results. */
         this.splitWorker.onmessage = (message) => { this.handleSplitWorkerResponse(message); };
+        this.biteWorker = new AsteroidBiteWorker();
+        this.biteWorker.onmessage = (message) => { this.handleBiteWorkerResponse(message); };
     }
 
     updateTime(dt) {
@@ -200,6 +204,21 @@ export class World {
         });
     }
 
+    /**
+     * Enqueues a biteWorker task.
+     */
+    biteAsteroid(asteroid, impact) {
+        this.biteWorker.postMessage({
+            asteroid: {
+                uuid: asteroid.uuid,
+                position: {x: asteroid.position.x, y: asteroid.position.y, z: asteroid.position.z},
+                rotation: {x: asteroid.rotation.x, y: asteroid.rotation.y, z: asteroid.rotation.z},
+                vertexArray: asteroid.geometry.attributes.position.array,
+            },
+            impact: { point: impact.point, velocity: impact.velocity }
+        });
+    }
+
     updateAsteroids(dt) {
         const asteroidRemovalDistanceSq = this.asteroidRemovalDistance * this.asteroidRemovalDistance;
         this.asteroids.forEach(a => {
@@ -217,6 +236,11 @@ export class World {
      * Explodes an asteroid and spawns debris ("material").
      */
     explodeAsteroid(asteroid) {
+        this.removeAsteroid(asteroid);
+
+        // Skip when no geometry is left after laser bite
+        if (asteroid.geometry.attributes.position.count == 0) { return; }
+
         this.particles.handleAsteroidExplosion(asteroid);
 
         // Spawn more debris objects when asteroid was shot down by player (but same total value)
@@ -230,8 +254,6 @@ export class World {
             this.debris.push(debris);
             this.scene.add(debris);
         }
-
-        this.removeAsteroid(asteroid);
     }
 
     removeAsteroid(asteroid) {
@@ -357,7 +379,7 @@ export class World {
             hitBy: "laser"
         };
         asteroid.userData.recentImpact = impact;
-        asteroid.userData.bite(impact);
+        this.biteAsteroid(asteroid, impact);
 
         this.particles.handleLaserAsteroidImpact(impact, asteroid);
         this.removeLaser(laser);
@@ -459,6 +481,15 @@ export class World {
         }
     }
 
+    handleBiteWorkerResponse(message) {
+        const asteroid = this.asteroids.find((a) => a.uuid == message.data.uuid);
+        if (!asteroid) { return; }
+
+        asteroid.geometry.setAttribute("position", new THREE.Float32BufferAttribute(message.data.vertexArray, 3));
+        asteroid.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(message.data.normalArray, 3));
+        addBarycentricCoordinates(asteroid.geometry);
+    }
+
     /** Provides dummy scenes with increasing number of lights to pre-compile shaders. */
     *loadingScenes(numLights = 30) {
         const scene = new THREE.Scene();
@@ -489,7 +520,7 @@ export class World {
     }
 }
 
-export function checkLaserHit(laser, asteroids, dt) {
+function checkLaserHit(laser, asteroids, dt) {
     const raycaster = new THREE.Raycaster();
     raycaster.firstHitOnly = true;
 

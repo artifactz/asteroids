@@ -1,6 +1,6 @@
 import Ammo from 'ammo.js';
 import * as THREE from 'three';
-import { iteratePoints } from './GeometryUtils.js';
+import { iteratePoints } from './geometry/GeometryUtils.js';
 
 
 /**

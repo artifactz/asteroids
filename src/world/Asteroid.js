@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { SUBTRACTION, Brush, Evaluator, computeMeshVolume } from 'three-bvh-csg';
-import { splitEdgesAtVertices } from '../geometry/EdgeSplitter.js';
-import { removeCollapsedTriangles } from '../GeometryUtils.js';
+import { computeMeshVolume } from 'three-bvh-csg';
+import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
 
 
 const shaderAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1.0 });
@@ -78,8 +77,6 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
         materialValue: 2.5,
         splitAge: null,
         type: "asteroid",
-
-        bite(impact) { biteAsteroid(mesh, impact); }
     };
 
     Object.defineProperty(mesh.userData, "isSplitting", { get: function () { return mesh.userData.splitAge !== null; } });
@@ -90,59 +87,4 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
 /** For loading scenes. */
 export function createDummyAsteroid() {
     return new THREE.Mesh(new THREE.BoxGeometry(), shaderAsteroidMat);
-}
-
-/**
- * Generates barycentric coords for every triangle.
- */
-function addBarycentricCoordinates(geometry) {
-    const count = geometry.attributes.position.count;  // vertex count
-    const bary = new Float32Array(count * 3);
-    for (let i = 0; i < count; i += 3) {
-        bary.set([1,0,0,  0,1,0,  0,0,1], i * 3);
-    }
-    geometry.setAttribute('barycentric', new THREE.BufferAttribute(bary, 3));
-}
-
-
-const biteRadius = 0.3;
-const biteDepth = 0.1;
-const biteGeometry = new THREE.IcosahedronGeometry(biteRadius, 0);
-const biteBrush = new Brush(biteGeometry);
-const biteEvaluator = new Evaluator();
-biteEvaluator.attributes = ["position"];
-
-/**
- * Subtracts a low-detail sphere from the geometry around the impact area.
- * @param {THREE.Mesh} asteroid 
- * @param {Object} impact Impact object with a point and a velocity.
- */
-export function biteAsteroid(asteroid, impact, rx = null, ry = null, rz = null) {
-    // TODO intersect and use surface sampler on result to create particles
-    const asteroidBrush = new Brush(asteroid.geometry);
-    const negativeNormalizedImpact = impact.velocity.clone().normalize().multiplyScalar(-1);
-    biteBrush.position.copy(asteroid.worldToLocal(
-        impact.point.clone().add(negativeNormalizedImpact.multiplyScalar(biteRadius - biteDepth))
-    ));
-    rx = rx || Math.random() * 2 * Math.PI;
-    ry = ry || Math.random() * 2 * Math.PI;
-    rz = rz || Math.random() * 2 * Math.PI;
-
-    biteBrush.rotation.set(rx, ry, rz);
-    biteBrush.updateMatrixWorld();
-
-    const result = biteEvaluator.evaluate(asteroidBrush, biteBrush, SUBTRACTION);
-    let geo = result.geometry;
-
-    geo = BufferGeometryUtils.mergeVertices(geo, 0.0001);
-    removeCollapsedTriangles(geo);
-    geo = splitEdgesAtVertices(geo);
-    geo = BufferGeometryUtils.mergeVertices(geo, 0.04);
-    removeCollapsedTriangles(geo);
-
-    geo = geo.toNonIndexed();
-    geo.computeVertexNormals();
-    addBarycentricCoordinates(geo);
-
-    asteroid.geometry = geo;
 }

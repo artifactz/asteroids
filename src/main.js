@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { SSAARenderPass } from 'three/examples/jsm/postprocessing/SSAARenderPass.js';
-import { getMousePositionAtZ } from './Targeting';
-import { World } from './GameObjects';
-import { SmokeLighting, Blend } from './PostProcessing';
-import { initHud, showGameStart, updateFps } from './Hud';
-import { GameController } from './GameController';
+import { getMousePositionAtZ } from './Targeting.js';
+import { World } from './world/World.js';
+import { SmokeLighting, Blend } from './PostProcessing.js';
+import { initHud, showGameStart, updateFps } from './Hud.js';
+import { GameController } from './GameController.js';
 
 
 const clock = new THREE.Clock();

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { SUBTRACTION, INTERSECTION, Brush, Evaluator } from 'three-bvh-csg';
 import { splitEdgesAtVertices } from '../geometry/EdgeSplitter.js';
-import { removeCollapsedTriangles } from '../GeometryUtils.js';
+import { removeCollapsedTriangles } from './GeometryUtils.js';
 
 
 /**

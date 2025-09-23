@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { showGameOver, showGameStart, showHud, updateMaterial, updateThrustBar } from './Hud';
 import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting';
-import { World } from './GameObjects.js';
+import { World } from './world/World.js';
 
 const GameState = {
     StartScreen: 'StartScreen',

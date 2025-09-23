@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { getRotatedPointVelocity } from '../GeometryUtils';
+import { getRotatedPointVelocity } from '../geometry/GeometryUtils.js';
 
 /** Creates "material". */
 export function createDebris(asteroid, materialValue, timestamp) {
