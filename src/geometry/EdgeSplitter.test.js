@@ -76,14 +76,14 @@ test('splitEdgesAtVertices: ignore hole', () => {
 
 /**
  *   /1\           /1\
- *  /   \         / | \
- * 2--0--3  ==>  2--0--3
- *  \   /         \ | /
+ *  /   \         /   \
+ * 2--0--3  ==>  2-----3
+ *  \   /         \   /
  *   \4/           \4/
  * 
- * 2, 0, 3 is a flat triangle
+ * 2, 0, 3 is a collapsed triangle
  */
-test('splitEdgesAtVertices: remove and split at flat triangle', () => {
+test('splitEdgesAtVertices: remove flat (collapsed) triangle', () => {
     const geometry = new THREE.BufferGeometry();
     const vertices = new Float32Array([
         0.0, 0.0, 0.0,  // center
@@ -98,9 +98,12 @@ test('splitEdgesAtVertices: remove and split at flat triangle', () => {
 
     const newGeometry = splitEdgesAtVertices(geometry, 0.0001);
 
-    // TODO awkward... best solution would be to only delete the flat triangle
+    // geometry should still contain the lower and upper triangles
     expect(hasTriangle(newGeometry, vertices, 1, 2, 3)).toBe(true);
     expect(hasTriangle(newGeometry, vertices, 2, 4, 3)).toBe(true);
+
+    // geometry should not contain the collapsed triangle anymore
+    expect(hasTriangle(newGeometry, vertices, 0, 2, 3)).toBe(false);
 
     expect(newGeometry.index.array.length).toBe(6);
 });

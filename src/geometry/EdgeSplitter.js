@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 
 /**
- * Splits edges of a geometry at vertices that are close enough to the edge.
+ * Splits edges of a geometry at any vertices that are close enough to the edge.
  * This avoids holes in the geometry when merging close-by vertices.
+ * Instead of splitting, removes any collapsed triangles (u, v, w) where u touches (v, w).
  */
 export function splitEdgesAtVertices(geometry, tolerance = 0.0001) {
     if (!geometry.index) { throw new Error('Input geometry must be indexed'); }
