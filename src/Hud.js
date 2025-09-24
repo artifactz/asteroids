@@ -1,8 +1,12 @@
+import { submitHighscore } from "./Highscore.js";
+
 const THRUST_NUM_SEGMENTS = 8;
 const thrustSegments = [];
 const thrustContainer = document.getElementById('thrust-bar-container');
 const gameStartContainer = document.getElementById('game-start-container');
 const gameOverContainer = document.getElementById('game-over-container');
+const highscoresContainer = document.getElementById('highscores-container');
+const highscoresTable = document.getElementById('highscores-table');
 const materialContainer = document.getElementById('material-container');
 const materialText = document.getElementById('material-text');
 const fpsText = document.getElementById('fps-text');
@@ -60,19 +64,126 @@ export function updateFps(value) {
 }
 
 export function showGameStart() {
+    gameStartContainer.style.display = "block";
     gameStartContainer.classList.add("visible");
-    gameOverContainer.classList.remove("visible");
     thrustContainer.style.display = "none";
     materialContainer.style.display = "none";
 }
 
 export function showHud() {
     gameStartContainer.classList.remove("visible");
-    gameOverContainer.classList.remove("visible");
+    hideOnFadeout(gameStartContainer);
     thrustContainer.style.display = "flex";
     materialContainer.style.display = "flex";
 }
 
 export function showGameOver() {
+    gameOverContainer.style.display = "block";
     gameOverContainer.classList.add("visible");
+}
+
+export function showHighscores(data, playerScore) {
+    const roundedPlayerScore = Math.round(playerScore * 10) / 10;
+    updateHighscores(data, roundedPlayerScore);
+    gameOverContainer.classList.remove("visible");
+    hideOnFadeout(gameOverContainer);
+    highscoresContainer.style.display = "block";
+    highscoresContainer.classList.add("visible");
+    thrustContainer.style.display = "none";
+    materialContainer.style.display = "none";
+}
+
+/**
+ * Updates the highscores table with the given data.
+ * @param {Array} data Highscore data array.
+ * @param {number} playerScore Optional player score to allow submission if eligible.
+ */
+function updateHighscores(data, playerScore = null) {
+    if (!data) {
+        highscoresTable.innerHTML = '<tr><td class="highscores-error">Server unreachable.</td></tr>';
+        return;
+    }
+
+    let tableContent = "";
+    let isEligible = false
+    let rowNumber = 0;
+    for (const row of data) {
+        if (playerScore && !isEligible && row.score <= playerScore) {
+            tableContent += `<tr><td class="highscores-position">${rowNumber + 1}.</td><td class="highscores-name"><input type="text" id="highscores-name-input" maxlength="20"></td><td class="highscores-score">${playerScore}<input id="highscores-name-submit" type="button" value="Submit"></td></tr>`;
+            isEligible = true;
+            rowNumber++;
+            if (rowNumber > 9) { break; }
+        }
+        let nameClasses;
+        if (rowNumber == 0) {
+            nameClasses = "highscores-name highscores-name-1st";
+        } else if (rowNumber == 1) {
+            nameClasses = "highscores-name highscores-name-2nd";
+        } else if (rowNumber == 2) {
+            nameClasses = "highscores-name highscores-name-3rd";
+        } else {
+            nameClasses = "highscores-name";
+        }
+        tableContent += `<tr><td class="highscores-position">${rowNumber + 1}.</td><td class="${nameClasses}">${row.name}</td><td class="highscores-score">${row.score}</td></tr>`;
+        rowNumber++;
+        if (rowNumber > 9) { break; }
+    }
+    highscoresTable.innerHTML = tableContent;
+
+    if (isEligible) {
+        // Inputs were added, so add event handling
+        addHighscoresEventHandling(playerScore);
+    }
+}
+
+/**
+ * Adds event handling to the highscore name input and submit button.
+ * @param {number} playerScore The player's score to submit.
+ */
+function addHighscoresEventHandling(playerScore) {
+    const nameInput = document.getElementById('highscores-name-input');
+    const submitButton = document.getElementById('highscores-name-submit');
+    for (const element of [nameInput, submitButton]) {
+        for (const eventName of ["mousedown", "mouseup", "click", "contextmenu"]) {
+
+            if (element === submitButton && eventName == "click") {
+                element.addEventListener(eventName, (e) => {
+                    submitHighscore(
+                        nameInput.value,
+                        playerScore,
+                        (data_) => { updateHighscores(data_); },
+                        (err) => {
+                            if (err == "Invalid name") {
+                                nameInput.classList.add("highscores-name-input-invalid");
+                                setTimeout(() => { nameInput.classList.remove("highscores-name-input-invalid"); }, 1000);
+                            }
+                        }
+                    );
+                    e.stopPropagation();
+                }, true);
+
+            } else {
+                // Capture mouse events and do default action
+                element.addEventListener(eventName, e => { e.stopPropagation(); }, true);
+            }
+        }
+    }
+
+    nameInput.addEventListener("keypress", (e) => { if (e.key === "Enter") { submitButton.click(); } });
+}
+
+/**
+ * Hides the element (display: none) after fade-out transition ends.
+ * @param {HTMLElement} element
+ */
+function hideOnFadeout(element) {
+    element.addEventListener(
+        'transitionend',
+        (e) => {
+            if (e.propertyName === "opacity") {
+                element.style.display = "none";
+            }
+        },
+        { once: true }
+    );
 }

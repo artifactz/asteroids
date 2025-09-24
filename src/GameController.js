@@ -1,12 +1,15 @@
 import * as THREE from 'three';
-import { showGameOver, showGameStart, showHud, updateMaterial, updateThrustBar } from './Hud';
-import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting';
+import { showGameOver, showHighscores, showHud, updateMaterial, updateThrustBar } from './Hud.js';
+import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting.js';
 import { World } from './world/World.js';
+import * as Highscore from './Highscore.js';
+
 
 const GameState = {
-    StartScreen: 'StartScreen',
-    Playing: 'Playing',
-    EndScreen: 'EndScreen',
+    StartScreen: 1,
+    Playing: 2,
+    GameOverScreen: 3,
+    HighscoresScreen: 4,
 };
 
 const GameParameters = {
@@ -32,6 +35,7 @@ export class GameController {
         this.startAsteroidAngles = []; // directions of already spawned asteroid clusters
         this.startAsteroidHeat = 0;
         this.asteroidSpawnProbability = 10.0; // resets to 0 at every spawn
+        this.gameOverTimestamp = null; // avoids accidentally skipping Game Over screen when clicking furiously
 
         // Prepare start screen
         this.originalPlayerMaxSpeed = world.player.userData.maxSpeed;
@@ -50,7 +54,13 @@ export class GameController {
             this.world.sounds.play("ambient", { loop: true });
 
         } else if (this.state == GameState.Playing && !this.world.player.userData.isAlive) {
-            this.state = GameState.EndScreen;
+            this.state = GameState.GameOverScreen;
+            this.gameOverTimestamp = this.world.time;
+            Highscore.fetchHighscores();
+
+        } else if (this.state == GameState.GameOverScreen && this.world.time > this.gameOverTimestamp + 2 && mouse[0]) {
+            this.state = GameState.HighscoresScreen;
+            showHighscores(Highscore.highscoreData, this.world.player.userData.material);
 
         } else if (this.state == GameState.Playing) {
             if (mouse.positionWorld) { rotateTowards(this.world.player, mouse.positionWorld, dt); }
@@ -117,7 +127,7 @@ export class GameController {
             updateThrustBar(thrust);
             updateMaterial(this.world.player.userData.material);
         }
-        if (this.state == GameState.EndScreen && this.prevState == GameState.Playing) {
+        if (this.state == GameState.GameOverScreen && this.prevState == GameState.Playing) {
             showGameOver();
         }
 

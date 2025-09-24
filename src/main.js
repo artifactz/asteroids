@@ -54,8 +54,8 @@ const controller = new GameController(world);
 // === Input ===
 const keys = {};
 const mouse = {};
-window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
-window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+window.addEventListener('keydown', e => { if (e.key) { keys[e.key.toLowerCase()] = true; } });
+window.addEventListener('keyup', e => { if (e.key) { keys[e.key.toLowerCase()] = false; } });
 window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
 window.addEventListener('mousedown', e => { e.preventDefault(); mouse[e.button] = true; mouse.x = e.clientX; mouse.y = e.clientY; });
 window.addEventListener('mouseup', e => { e.preventDefault(); mouse[e.button] = false; mouse.x = e.clientX; mouse.y = e.clientY; });
