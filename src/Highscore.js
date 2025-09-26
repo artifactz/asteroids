@@ -1,6 +1,7 @@
 export let highscoreData;
 
 export function fetchHighscores() {
+    highscoreData = null;
     fetch("https://asteroids-highscores-1068571013537.europe-west10.run.app")
         .then((response) => { return response.json(); })
         .then((data) => { highscoreData = data; })

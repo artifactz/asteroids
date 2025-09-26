@@ -4,7 +4,7 @@ import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import { createAsteroid, createAsteroidGeometry, createDummyAsteroid } from './Asteroid.js';
 import { Universe } from './Universe.js';
 import { ParticleSystem } from '../Particles.js';
-import { createDebris } from './Debris.js';
+import { createDebris, createDummyDebris } from './Debris.js';
 import AsteroidSplitWorker from '../workers/AsteroidSplitWorker.js?worker';
 import AsteroidBiteWorker from '../workers/AsteroidBiteWorker.js?worker';
 import { Physics } from '../Physics.js';
@@ -496,7 +496,11 @@ export class World {
         this.addDefaultLights(scene);
 
         const asteroidBox = createDummyAsteroid();
+        asteroidBox.position.x -= 0.75;
         scene.add(asteroidBox);
+        const debrisBox = createDummyDebris();
+        debrisBox.position.x += 0.75;
+        scene.add(debrisBox);
 
         this.particles.scene = scene;
         this.particles.addColorParticleChunk([-1.5, 0, 0], [0, 0, 0], 1, 1, 0, 0, 0x999999);
@@ -510,8 +514,8 @@ export class World {
             const color = new THREE.Color(Math.random(), Math.random(), Math.random());
             const light = new THREE.PointLight(color, 1, 10);
             light.position.set(
-                2.0 * Math.cos(i / numLights * 2 * Math.PI),
-                2.0 * Math.sin(i / numLights * 2 * Math.PI),
+                3.0 * Math.cos(i / numLights * 2 * Math.PI),
+                3.0 * Math.sin(i / numLights * 2 * Math.PI),
                 1.5
             );
             scene.add(light);

@@ -3,6 +3,7 @@ import { showGameOver, showHighscores, showHud, updateMaterial, updateThrustBar 
 import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting.js';
 import { World } from './world/World.js';
 import * as Highscore from './Highscore.js';
+import { GameControllerParameters } from './Parameters.js'
 
 
 const GameState = {
@@ -11,16 +12,6 @@ const GameState = {
     GameOverScreen: 3,
     HighscoresScreen: 4,
 };
-
-const GameParameters = {
-    numStartAsteroids: 4,
-    startAsteroidCooldown: 3.5,
-    initialAsteroidSpawnProbability: 10.0,
-    asteroidSpawnDistance: 32,
-    asteroidSpawnProbabilityGainPerSecond: 0.15,
-    maxAsteroids: 100,
-    startScreenPlayerSpeed: 40,
-}
 
 export class GameController {
     /**
@@ -36,12 +27,13 @@ export class GameController {
         this.startAsteroidHeat = 0;
         this.asteroidSpawnProbability = 10.0; // resets to 0 at every spawn
         this.gameOverTimestamp = null; // avoids accidentally skipping Game Over screen when clicking furiously
+        this.hasClickedGameOver = false; // handles delaying transition until receiving highscores
 
         // Prepare start screen
         this.originalPlayerMaxSpeed = world.player.userData.maxSpeed;
         this.originalPlayerMaxRotationalSpeed = world.player.userData.maxRotationalSpeed;
-        world.player.userData.maxSpeed = GameParameters.startScreenPlayerSpeed;
-        world.player.userData.speed = GameParameters.startScreenPlayerSpeed;
+        world.player.userData.maxSpeed = GameControllerParameters.startScreenPlayerSpeed;
+        world.player.userData.speed = GameControllerParameters.startScreenPlayerSpeed;
         this.world.player.userData.maxRotationalSpeed = 0;
         world.player.rotation.z = 0.125 * Math.PI;
     }
@@ -58,7 +50,16 @@ export class GameController {
             this.gameOverTimestamp = this.world.time;
             Highscore.fetchHighscores();
 
-        } else if (this.state == GameState.GameOverScreen && this.world.time > this.gameOverTimestamp + 2 && mouse[0]) {
+        } else if (
+            this.state == GameState.GameOverScreen && mouse[0] &&
+            this.world.time > this.gameOverTimestamp + GameControllerParameters.gameOverDuration
+        ) {
+            this.hasClickedGameOver = true;
+
+        } else if (
+            this.state == GameState.GameOverScreen && this.hasClickedGameOver &&
+            (Highscore.highscoreData || this.world.time > this.gameOverTimestamp + GameControllerParameters.highscoresTimeout)
+        ) {
             this.state = GameState.HighscoresScreen;
             showHighscores(Highscore.highscoreData, this.world.player.userData.material);
 
@@ -69,12 +70,10 @@ export class GameController {
                 const decay = Math.pow(0.5, dt)
                 this.world.player.userData.speed *= decay;
 
-                const easeInEndSpeed = 0.5 * this.originalPlayerMaxSpeed;
-                const alpha = (this.world.player.userData.speed - easeInEndSpeed) / (GameParameters.startScreenPlayerSpeed - easeInEndSpeed);
+                const alpha = (this.world.player.userData.speed - this.originalPlayerMaxSpeed) / (GameControllerParameters.startScreenPlayerSpeed - this.originalPlayerMaxSpeed);
                 this.world.player.userData.maxRotationalSpeed = (1 - alpha) * this.originalPlayerMaxRotationalSpeed;
 
-                if (this.world.player.userData.speed <= 0.5 * this.originalPlayerMaxSpeed) {
-                    this.world.player.userData.speed = 0.5 * this.originalPlayerMaxSpeed;
+                if (this.world.player.userData.speed <= this.originalPlayerMaxSpeed) {
                     this.world.player.userData.maxSpeed = this.originalPlayerMaxSpeed;
                     this.isEaseInStage = false;
                     this.isStartAsteroidStage = true;
@@ -121,9 +120,7 @@ export class GameController {
 
         // Update UI
         if (this.state == GameState.Playing) {
-            const thrust = (this.isEaseInStage)
-                ? 0.5 + 0.5 * this.world.player.userData.speed / this.world.player.userData.maxSpeed
-                : this.world.player.userData.speed / this.world.player.userData.maxSpeed;
+            const thrust = (this.isEaseInStage) ? 1 : this.world.player.userData.speed / this.world.player.userData.maxSpeed;
             updateThrustBar(thrust);
             updateMaterial(this.world.player.userData.material);
         }
@@ -138,7 +135,7 @@ export class GameController {
         if (this.state == GameState.Playing && mouse.positionWorld) {
             moveCamera(this.world, mouse.positionWorld, dt);
         } else if (this.state == GameState.StartScreen) {
-            fixCameraOnPlayer(this.world, 0, -2.5);
+            fixCameraOnPlayer(this.world, 0, -3.0);
         }
     }
 
@@ -149,20 +146,20 @@ export class GameController {
             // TODO might get surrounded this way...
             const angle = this.world.player.rotation.z;
             if (this.startAsteroidHeat <= 0 && this.isStartAsteroidAngleAvailable(angle)) {
-                for (const deltaAngle of linspace(-0.1 * Math.PI, 0.1 * Math.PI, GameParameters.numStartAsteroids)) {
+                for (const deltaAngle of linspace(-0.1 * Math.PI, 0.1 * Math.PI, GameControllerParameters.numStartAsteroids)) {
                     const position = this.world.player.position.clone().add(new THREE.Vector3(
-                        GameParameters.asteroidSpawnDistance * Math.cos(angle + deltaAngle),
-                        GameParameters.asteroidSpawnDistance * Math.sin(angle + deltaAngle),
+                        GameControllerParameters.asteroidSpawnDistance * Math.cos(angle + deltaAngle),
+                        GameControllerParameters.asteroidSpawnDistance * Math.sin(angle + deltaAngle),
                         0
                     ));
                     const velocity = this.world.player.position.clone().sub(position).normalize().multiplyScalar(4);
                     this.world.spawnAsteroid(position, velocity);
                 }
                 this.startAsteroidAngles.push(angle);
-                this.startAsteroidHeat = GameParameters.startAsteroidCooldown;
+                this.startAsteroidHeat = GameControllerParameters.startAsteroidCooldown;
             }
 
-            const disableStartAsteroidsDistance = GameParameters.asteroidSpawnDistance / 2;
+            const disableStartAsteroidsDistance = GameControllerParameters.asteroidSpawnDistance / 2;
             for (const asteroid of this.world.asteroids) {
                 if (asteroid.position.clone().sub(this.world.player.position).lengthSq() < disableStartAsteroidsDistance * disableStartAsteroidsDistance) {
                     this.isStartAsteroidStage = false;
@@ -176,9 +173,9 @@ export class GameController {
             return;
         }
 
-        this.asteroidSpawnProbability += GameParameters.asteroidSpawnProbabilityGainPerSecond * dt;
-        if (this.world.asteroids.length < GameParameters.maxAsteroids && Math.random() < this.asteroidSpawnProbability * dt) {
-            const { position, velocity } = getOrthogonalCollisionTrajectory(this.world.player, GameParameters.asteroidSpawnDistance, 1);
+        this.asteroidSpawnProbability += GameControllerParameters.asteroidSpawnProbabilityGainPerSecond * dt;
+        if (this.world.asteroids.length < GameControllerParameters.maxAsteroids && Math.random() < this.asteroidSpawnProbability * dt) {
+            const { position, velocity } = getOrthogonalCollisionTrajectory(this.world.player, GameControllerParameters.asteroidSpawnDistance, 1);
             this.world.spawnAsteroid(position, velocity);
             this.asteroidSpawnProbability = 0;
         }
