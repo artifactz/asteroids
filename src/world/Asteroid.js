@@ -55,7 +55,7 @@ export function createAsteroidGeometry(radius = 0.9) {
     return geo;
 }
 
-export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40) {
+export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 15) {
     if (geometry.index) { geometry = geometry.toNonIndexed(); }
     geometry.computeVertexNormals();
     addBarycentricCoordinates(geometry);
@@ -76,6 +76,7 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 40)
         health: 30 * Math.sqrt(volume) + randomHealth * Math.random(),
         materialValue: 2.5,
         splitAge: null,
+        isBitten: false,
         type: "asteroid",
     };
 

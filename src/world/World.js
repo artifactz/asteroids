@@ -4,12 +4,13 @@ import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import { createAsteroid, createAsteroidGeometry, createDummyAsteroid } from './Asteroid.js';
 import { Universe } from './Universe.js';
 import { ParticleSystem } from '../Particles.js';
-import { createDebris, createDummyDebris } from './Debris.js';
+import { createDebris, createDummyDebris, debrisMaterial } from './Debris.js';
 import AsteroidSplitWorker from '../workers/AsteroidSplitWorker.js?worker';
 import AsteroidBiteWorker from '../workers/AsteroidBiteWorker.js?worker';
 import { Physics } from '../Physics.js';
 import { Sounds } from '../Sounds.js';
 import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
+import { WorldParameters } from '../Parameters.js';
 
 // Set up accelerated laser/asteroid collision detection
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -25,12 +26,6 @@ export class World {
      * @param {THREE.DepthTexture} depthTexture Main scene depth buffer for the particle renderer.
      */
     constructor(renderer, depthTexture) {
-        this.asteroidExplosionVolume = 0.15;
-        this.asteroidRemovalDistance = 60;
-        this.debrisTakeDistance = 3.5;
-        this.debrisTakeDuration = 1.0;
-        this.debrisTakeFinishDistance = 0.4;
-
         this.time = 0;
         this.physics = new Physics();
         this.scene = new THREE.Scene();
@@ -208,6 +203,9 @@ export class World {
      * Enqueues a biteWorker task.
      */
     biteAsteroid(asteroid, impact) {
+        if (asteroid.userData.isBitten) { return; }
+        asteroid.userData.isBitten = true;
+
         this.biteWorker.postMessage({
             asteroid: {
                 uuid: asteroid.uuid,
@@ -220,7 +218,7 @@ export class World {
     }
 
     updateAsteroids(dt) {
-        const asteroidRemovalDistanceSq = this.asteroidRemovalDistance * this.asteroidRemovalDistance;
+        const asteroidRemovalDistanceSq = WorldParameters.asteroidRemovalDistance * WorldParameters.asteroidRemovalDistance;
         this.asteroids.forEach(a => {
             if (a.position.clone().sub(this.player.position).lengthSq() > asteroidRemovalDistanceSq) {
                 // Remove asteroid when it drifts too far
@@ -249,7 +247,7 @@ export class World {
         const materialValue = asteroid.userData.materialValue * asteroid.userData.volume / numDebris;
 
         for (let i = 0; i < numDebris; i++) {
-            const debris = createDebris(asteroid, materialValue, this.time);
+            const debris = createDebris(asteroid, materialValue, this.time, isHeroic);
             this.physics.add(debris, undefined, false);
             this.debris.push(debris);
             this.scene.add(debris);
@@ -263,11 +261,26 @@ export class World {
         asteroid.userData.isRemoved = true;
     }
 
-    /** Handles material pickup. */
+    /** Handles debris (aka. material) pickup and updates its appearance. */
     updateDebris(dt) {
-        const takeDistSq = this.debrisTakeDistance * this.debrisTakeDistance;
-        const takeFinishDistSq = this.debrisTakeFinishDistance * this.debrisTakeFinishDistance;
+        const takeDistSq = WorldParameters.debrisTakeDistance * WorldParameters.debrisTakeDistance;
+        const takeFinishDistSq = WorldParameters.debrisTakeFinishDistance * WorldParameters.debrisTakeFinishDistance;
         for (const debris of this.debris) {
+            if (debris.userData.transformProgress == 0) {
+                // Initialize material lerp
+                debris.material = debris.material.clone();
+            }
+            if (debris.userData.transformProgress < 1) {
+                // Material lerp from "asteroid" to "debris"
+                debris.material.color = debris.userData.initialColor.clone().lerp(debrisMaterial.color, debris.userData.transformProgress);
+                debris.material.roughness = (1 - debris.userData.transformProgress) * 1.0 + debris.userData.transformProgress * 0.1;
+                debris.material.emissiveIntensity = debris.userData.transformProgress * 0.05;
+                debris.material.metalness = debris.userData.transformProgress * 0.8;
+                debris.userData.transformProgress += dt / WorldParameters.debrisTransformDuration;
+                if (debris.userData.transformProgress >= 1) {
+                    debris.material = debrisMaterial;
+                }
+            }
             if (debris.userData.takeProgress === null) {
                 // Idle
                 const offset = new THREE.Vector2(debris.position.x, debris.position.y).sub(new THREE.Vector2(this.player.position.x, this.player.position.y));
@@ -291,7 +304,6 @@ export class World {
                     } else {
                         // Fade out
                         debris.material.opacity -= dt / debris.userData.fadeoutTime;
-                        debris.material.needs
                     }
                 }
             } else if (debris.userData.takeProgress >= 1 || debris.position.clone().sub(this.player.position).lengthSq() < takeFinishDistSq) {
@@ -302,7 +314,7 @@ export class World {
                 this.sounds.play("take", { pitch: 1.0 + 0.1 * (Math.random() - 0.5) }, 0.07);
             } else {
                 // Suck in
-                debris.userData.takeProgress += dt / this.debrisTakeDuration;
+                debris.userData.takeProgress += dt / WorldParameters.debrisTakeDuration;
                 const alpha = debris.userData.takeProgress * debris.userData.takeProgress;
                 const position = debris.userData.takeOriginalPosition.clone().multiplyScalar(1 - alpha).addScaledVector(this.player.position, alpha);
                 debris.position.copy(position);
@@ -457,7 +469,7 @@ export class World {
 
             sign *= -1;
 
-            if (mesh.userData.volume <= this.asteroidExplosionVolume) {
+            if (mesh.userData.volume <= WorldParameters.asteroidExplosionVolume) {
                 this.explodeAsteroid(mesh);
                 exploded = true;
             } else {
@@ -488,6 +500,7 @@ export class World {
         asteroid.geometry.setAttribute("position", new THREE.Float32BufferAttribute(message.data.vertexArray, 3));
         asteroid.geometry.setAttribute("normal", new THREE.Float32BufferAttribute(message.data.normalArray, 3));
         addBarycentricCoordinates(asteroid.geometry);
+        asteroid.userData.isBitten = false;
     }
 
     /** Provides dummy scenes with increasing number of lights to pre-compile shaders. */

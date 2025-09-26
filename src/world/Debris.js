@@ -3,10 +3,17 @@ import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { getRotatedPointVelocity, pointToLineDistanceSquared } from '../geometry/GeometryUtils.js';
 import { DebrisParameters } from '../Parameters.js';
 
-const debrisMaterial = new THREE.MeshStandardMaterial({ color: 0xb0f0b0, roughness: 0.1, emissive: 0x44ff00, emissiveIntensity: 0.05, metalness: 0.8 });
+export const debrisMaterial = new THREE.MeshStandardMaterial({ color: 0xb0f0b0, roughness: 0.1, emissive: 0x44ff00, emissiveIntensity: 0.05, metalness: 0.8 });
 
-/** Creates debris (aka. material). */
-export function createDebris(asteroid, materialValue, timestamp) {
+/**
+ * Creates a piece of debris (aka. material) for the player to pick up.
+ * @param {THREE.Mesh} asteroid Exploding asteroid
+ * @param {number} materialValue Material value of this piece
+ * @param {number} timestamp Current world time
+ * @param {boolean} byLaser Whether the asteroid was destroyed by laser (true) or crashed with another asteroid (false)
+ * @returns {THREE.Mesh}
+ */
+export function createDebris(asteroid, materialValue, timestamp, byLaser) {
     let geometry = new THREE.IcosahedronGeometry(DebrisParameters.radius, 0);
     geometry.deleteAttribute('normal');
     geometry.deleteAttribute('uv');
@@ -45,11 +52,13 @@ export function createDebris(asteroid, materialValue, timestamp) {
     mesh.position.copy(position);
     mesh.userData = {
         timestamp,
-        ttl: 120,
-        fadeoutTime: 10,
+        ttl: DebrisParameters.ttl,
+        fadeoutTime: DebrisParameters.fadeoutTime,
         materialValue,
         velocity,
-        velocityDecay: 0.5,
+        velocityDecay: DebrisParameters.velocityDecay,
+        transformProgress: 0,
+        initialColor: (byLaser) ? DebrisParameters.initialColorByLaser : DebrisParameters.initialColorByCrash,
         takeProgress: null,
         takeOriginalPosition: null,
     }
