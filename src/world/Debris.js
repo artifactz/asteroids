@@ -40,7 +40,7 @@ export function createDebris(asteroid, materialValue, timestamp) {
 
     // Add impact velocity to debris near impact line
     const dist = pointToLineDistanceSquared(position, impact.point, impact.velocity);
-    velocity.addScaledVector(impact.velocity, DebrisParameters.baseImpactVelocity * Math.exp(-DebrisParameters.velocityImpactFalloff * dist));
+    velocity.addScaledVector(impact.velocity, DebrisParameters.baseImpactVelocity * Math.exp(-DebrisParameters.impactVelocityFalloff * dist));
 
     mesh.position.copy(position);
     mesh.userData = {
