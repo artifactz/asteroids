@@ -4,7 +4,7 @@ import { acceleratedRaycast, computeBoundsTree } from 'three-mesh-bvh';
 import { createAsteroid, createAsteroidGeometry, createDummyAsteroid } from './Asteroid.js';
 import { Universe } from './Universe.js';
 import { ParticleSystem } from '../Particles.js';
-import { createDebris, createDummyDebris, debrisMaterial } from './Debris.js';
+import { createDummyDebris, DebrisManager } from './Debris.js';
 import AsteroidSplitWorker from '../workers/AsteroidSplitWorker.js?worker';
 import AsteroidBiteWorker from '../workers/AsteroidBiteWorker.js?worker';
 import { Physics } from '../Physics.js';
@@ -38,7 +38,7 @@ export class World {
 
         this.asteroids = [];
         this.lasers = [];
-        this.debris = [];
+        this.debris = new DebrisManager(this.scene, this.physics);
         this.particles = new ParticleSystem(this.scene, this.camera, depthTexture);
         this.sounds = new Sounds();
 
@@ -132,7 +132,7 @@ export class World {
         asteroid.userData.velocity.copy(velocity);
         this.addAsteroid(asteroid);
 
-        console.log("Spawned asteroid distanceToPlayer=" + asteroid.position.clone().sub(this.player.position).length());
+        // console.log("Spawned asteroid distanceToPlayer=" + asteroid.position.clone().sub(this.player.position).length());
     }
 
     /**
@@ -247,10 +247,7 @@ export class World {
         const materialValue = asteroid.userData.materialValue * asteroid.userData.volume / numDebris;
 
         for (let i = 0; i < numDebris; i++) {
-            const debris = createDebris(asteroid, materialValue, this.time, isHeroic);
-            this.physics.add(debris, undefined, false);
-            this.debris.push(debris);
-            this.scene.add(debris);
+            this.debris.createDebris(asteroid, materialValue, this.time, isHeroic);
         }
     }
 
@@ -261,66 +258,18 @@ export class World {
         asteroid.userData.isRemoved = true;
     }
 
-    /** Handles debris (aka. material) pickup and updates its appearance. */
+    /** Handles debris (aka. material) pickup, updates its appearance, and plays pick-up sounds. */
     updateDebris(dt) {
-        const takeDistSq = WorldParameters.debrisTakeDistance * WorldParameters.debrisTakeDistance;
-        const takeFinishDistSq = WorldParameters.debrisTakeFinishDistance * WorldParameters.debrisTakeFinishDistance;
-        for (const debris of this.debris) {
-            if (debris.userData.transformProgress == 0) {
-                // Initialize material lerp
-                debris.material = debris.material.clone();
-            }
-            if (debris.userData.transformProgress < 1) {
-                // Material lerp from "asteroid" to "debris"
-                debris.material.color = debris.userData.initialColor.clone().lerp(debrisMaterial.color, debris.userData.transformProgress);
-                debris.material.roughness = (1 - debris.userData.transformProgress) * 1.0 + debris.userData.transformProgress * 0.1;
-                debris.material.emissiveIntensity = debris.userData.transformProgress * 0.05;
-                debris.material.metalness = debris.userData.transformProgress * 0.8;
-                debris.userData.transformProgress += dt / WorldParameters.debrisTransformDuration;
-                if (debris.userData.transformProgress >= 1) {
-                    debris.material = debrisMaterial;
-                }
-            }
-            if (debris.userData.takeProgress === null) {
-                // Idle
-                const offset = new THREE.Vector2(debris.position.x, debris.position.y).sub(new THREE.Vector2(this.player.position.x, this.player.position.y));
-                if (this.player.userData.isAlive && offset.lengthSq() < takeDistSq) {
-                    // Initiate being sucked in
-                    this.physics.remove(debris);
-                    debris.userData.takeProgress = 0;
-                    debris.userData.takeOriginalPosition = debris.position.clone();
-                    this.sounds.play("suck", { pitch: 1 + 0.2 * (Math.random() - 0.5) }, 0.07);
-                } else if (this.time > debris.userData.timestamp + debris.userData.ttl - debris.userData.fadeoutTime) {
-                    if (!debris.userData.isMaterialUnique) {
-                        // Initialize material for fade out
-                        debris.material = debris.material.clone();
-                        debris.material.transparent = true;
-                        debris.userData.isMaterialUnique = true;
-                    }
-                    if (this.time > debris.userData.timestamp + debris.userData.ttl) {
-                        // Discard
-                        this.scene.remove(debris);
-                        debris.userData.isRemoved = true;
-                    } else {
-                        // Fade out
-                        debris.material.opacity -= dt / debris.userData.fadeoutTime;
-                    }
-                }
-            } else if (debris.userData.takeProgress >= 1 || debris.position.clone().sub(this.player.position).lengthSq() < takeFinishDistSq) {
-                // Collect
-                this.player.userData.material += debris.userData.materialValue;
-                this.scene.remove(debris);
-                debris.userData.isRemoved = true;
-                this.sounds.play("take", { pitch: 1.0 + 0.1 * (Math.random() - 0.5) }, 0.07);
-            } else {
-                // Suck in
-                debris.userData.takeProgress += dt / WorldParameters.debrisTakeDuration;
-                const alpha = debris.userData.takeProgress * debris.userData.takeProgress;
-                const position = debris.userData.takeOriginalPosition.clone().multiplyScalar(1 - alpha).addScaledVector(this.player.position, alpha);
-                debris.position.copy(position);
-            }
+        const { newTakes, takenMaterial } = this.debris.update(
+            this.time, dt, (this.player.userData.isAlive) ? this.player.position : null
+        );
+        if (newTakes) {
+            this.sounds.play("suck", { pitch: 1 + 0.2 * (Math.random() - 0.5) }, 0.07);
         }
-        this.debris = this.debris.filter(d => !d.userData.isRemoved);
+        if (takenMaterial) {
+            this.player.userData.material += takenMaterial;
+            this.sounds.play("take", { pitch: 1.0 + 0.1 * (Math.random() - 0.5) }, 0.07);
+        }
     }
 
     updateUniverse() {

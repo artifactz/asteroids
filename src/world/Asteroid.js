@@ -2,9 +2,10 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeMeshVolume } from 'three-bvh-csg';
 import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
+import { AsteroidParameters } from '../Parameters.js';
 
 
-const shaderAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 1.0 });
+const shaderAsteroidMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: AsteroidParameters.materialRoughness });
 shaderAsteroidMat.onBeforeCompile = shader => {
     // inject barycentric
     shader.vertexShader   = `

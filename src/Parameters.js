@@ -12,9 +12,17 @@ export const GameControllerParameters = {
     highscoresTimeout: 7,
 }
 
+export const AsteroidParameters = {
+    materialRoughness: 1.0,
+}
+
 export const DebrisParameters = {
-    radius: 0.07,
+    radius: 0.09,
     noise: 0.7,
+    materialMetalness: 0.5,
+    materialRoughness: 0.3,
+    materialEmissiveIntensity: 0.15,
+    materialBaseOpacity: 0.8,
     ttl: 120,
     randomSpeedProbability: 0.2,
     maxRandomSpeed: 2,
@@ -22,17 +30,21 @@ export const DebrisParameters = {
     randomOutwardVelocity: 1.2,
     baseImpactVelocity: 0.2,
     impactVelocityFalloff: 10,
+    rotationalVelocity: 6.5,
     velocityDecay: 0.5,
+    staleMaxSpeedSquared: 1e-3,
+    staleMinZ: -2,
+    staleMaxZ: 7.5,
     fadeoutTime: 10,
     initialColorByLaser: new THREE.Color(1.0, 0.81, 0.4),
     initialColorByCrash: new THREE.Color(0.5333, 0.5333, 0.5333),
+    takeDistance: 3.5,
+    takeDuration: 1.0,
+    takeFinishDistance: 0.4,
+    transformDuration: 2.5,
 }
 
 export const WorldParameters = {
     asteroidExplosionVolume: 0.15,
     asteroidRemovalDistance: 60,
-    debrisTakeDistance: 3.5,
-    debrisTakeDuration: 1.0,
-    debrisTakeFinishDistance: 0.4,
-    debrisTransformDuration: 2.5,
 }

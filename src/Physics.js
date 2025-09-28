@@ -215,7 +215,8 @@ export class Physics {
         if (mesh.userData.collisionAge > 0.2) {
             // Steer toward z = 0 using PD controller
             const vel = body.getLinearVelocity();
-            const controlP = 1, controlD = 0.5;
+            const controlP = (mesh.userData.steer0P === undefined) ? 1 : mesh.userData.steer0P;
+            const controlD = (mesh.userData.steer0D === undefined) ? 0.5 : mesh.userData.steer0D;
             this.applyImpulse(mesh, new THREE.Vector3(0, 0, -(controlP * p.z() + controlD * vel.z()) * dt));
             Ammo.destroy(vel);
         }
@@ -231,13 +232,14 @@ export class Physics {
     /** Updates mesh pose without ammo.js. */
     updateBasicMesh(mesh, dt) {
         mesh.position.addScaledVector(mesh.userData.velocity, dt);
-        if (mesh.userData.collisionAge > 0.2) {
-            // Steer toward z = 0 using PD controller
-            const controlP = 1, controlD = 0.5;
-            mesh.userData.velocity.z -= (controlP * mesh.position.z + controlD * mesh.userData.velocity.z) * dt;
-        }
+        // Steer toward z = 0 using PD controller
+        const controlP = (mesh.userData.steer0P === undefined) ? 1 : mesh.userData.steer0P;
+        const controlD = (mesh.userData.steer0D === undefined) ? 0.5 : mesh.userData.steer0D;
+        mesh.userData.velocity.z -= (controlP * mesh.position.z + controlD * mesh.userData.velocity.z) * dt;
+
         if (mesh.userData.velocityDecay) {
             mesh.userData.velocity.multiplyScalar(Math.pow(mesh.userData.velocityDecay, dt));
+            mesh.userData.rotationalVelocity.multiplyScalar(Math.pow(mesh.userData.velocityDecay, dt));
         }
         if (mesh.userData.rotationalVelocity) {
             applyRotation(mesh, dt);
