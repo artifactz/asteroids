@@ -35,7 +35,11 @@ export class GameController {
         world.player.userData.maxSpeed = GameControllerParameters.startScreenPlayerSpeed;
         world.player.userData.speed = GameControllerParameters.startScreenPlayerSpeed;
         this.world.player.userData.maxRotationalSpeed = 0;
-        world.player.rotation.z = 0.125 * Math.PI;
+        world.player.rotation.z = -0.125 * Math.PI;
+        this.playerRotation = 0;
+        this.playerRotationChange = 0;
+        this.playerRotationChangeHeat = -9000;
+        this.world.player.userData.thrustOverride = 0.25;
     }
 
     update(keys, mouse, dt) {
@@ -44,6 +48,20 @@ export class GameController {
             this.isEaseInStage = true;
             showHud();
             this.world.sounds.play("ambient", { loop: true });
+
+        } else if (this.state == GameState.StartScreen) {
+            // Title screen random steering
+            if (this.playerRotationChangeHeat < -3) {
+                this.playerRotationChangeHeat = 3 + 3 * Math.random();
+                this.playerRotation = this.world.player.rotation.z;
+                this.playerRotationChange = (0.5 + Math.random()) * (Math.random() < 0.5) ? 1 : -1;
+            } else if (this.playerRotationChangeHeat >= -3 && this.playerRotationChangeHeat <= 0) {
+                let t = -this.playerRotationChangeHeat / 3;
+                t = 0.5 * Math.sin((t - 0.5) * Math.PI) + 0.5;
+                this.world.player.rotation.z = this.playerRotation + this.playerRotationChange * t;
+                this.world.player.userData.rotationalVelocity.z = 10.0 * this.playerRotationChange * Math.cos((t - 0.5) * Math.PI);
+            }
+            this.playerRotationChangeHeat -= dt;
 
         } else if (this.state == GameState.Playing && !this.world.player.userData.isAlive) {
             this.state = GameState.GameOverScreen;
@@ -75,6 +93,7 @@ export class GameController {
 
                 if (this.world.player.userData.speed <= this.originalPlayerMaxSpeed) {
                     this.world.player.userData.maxSpeed = this.originalPlayerMaxSpeed;
+                    this.world.player.userData.thrustOverride = null;
                     this.isEaseInStage = false;
                     this.isStartAsteroidStage = true;
                 }
@@ -115,7 +134,8 @@ export class GameController {
         this.world.updateLasers(dt);
         this.world.updateDebris(dt);
         this.world.particles.update(dt);
-        this.updateCamera(mouse, dt);
+        this.world.trail.update(this.world.time, dt);
+        this.updateCamera(mouse, this.world.time, dt);
         this.world.updateUniverse();
 
         // Update UI
@@ -131,11 +151,13 @@ export class GameController {
         this.prevState = this.state;
     }
 
-    updateCamera(mouse, dt) {
+    updateCamera(mouse, time, dt) {
         if (this.state == GameState.Playing && mouse.positionWorld) {
             moveCamera(this.world, mouse.positionWorld, dt);
         } else if (this.state == GameState.StartScreen) {
-            fixCameraOnPlayer(this.world, 0, -3.0);
+            const dx = 1.337 * Math.cos(0.6 * time);
+            const dy = Math.sin(0.52 * time) - 4;
+            fixCameraOnPlayer(this.world, dx, dy);
         }
     }
 

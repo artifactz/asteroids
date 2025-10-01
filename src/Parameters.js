@@ -32,9 +32,11 @@ export const DebrisParameters = {
     impactVelocityFalloff: 10,
     rotationalVelocity: 6.5,
     velocityDecay: 0.5,
+    steer0P: 0.001,
+    steer0D: 0.5,
     staleMaxSpeedSquared: 1e-3,
     staleMinZ: -2,
-    staleMaxZ: 7.5,
+    staleMaxZ: 6.5,
     fadeoutTime: 10,
     initialColorByLaser: new THREE.Color(1.0, 0.81, 0.4),
     initialColorByCrash: new THREE.Color(0.5333, 0.5333, 0.5333),
@@ -47,4 +49,17 @@ export const DebrisParameters = {
 export const WorldParameters = {
     asteroidExplosionVolume: 0.15,
     asteroidRemovalDistance: 60,
+}
+
+export const TrailParameters = {
+    minDistance: 0.1,
+    duration: 0.1,
+    baseWidth: 0.15,
+    baseAlpha: 0.1,
+    thrustAlpha: 0.9,
+    thrustActivationAttack: 7.0,
+    thrustActivationDecay: 0.25,
+    burstActivationDecay: 0.05,
+    deathSegmentsDecay: 0.5,
+    deathAlphaDelta: -4,
 }

@@ -11,6 +11,7 @@ import { Physics } from '../Physics.js';
 import { Sounds } from '../Sounds.js';
 import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
 import { WorldParameters } from '../Parameters.js';
+import { Trail } from './Trail.js';
 
 // Set up accelerated laser/asteroid collision detection
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -40,6 +41,7 @@ export class World {
         this.lasers = [];
         this.debris = new DebrisManager(this.scene, this.physics);
         this.particles = new ParticleSystem(this.scene, this.camera, depthTexture);
+        this.trail = new Trail(this.scene, this.player, this.particles);
         this.sounds = new Sounds();
 
         this.splitWorker = new AsteroidSplitWorker();
@@ -91,6 +93,7 @@ export class World {
             speed: 0.0,
             maxAccel: 6.0,
             accel: 0.0,
+            thrustOverride: null,
             maxRotationalSpeed: 3.8,
             laserCooldownPeriod: 0.2,
             laserHeat: 0.0,
@@ -357,6 +360,7 @@ export class World {
         this.player.userData.isAlive = false;
         this.player.userData.speed = 0;
         this.player.userData.accel = 0;
+        this.player.userData.rotationalVelocity.z = 0;
         this.player.clear(); // remove mesh
     }
 
