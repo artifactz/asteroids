@@ -52,14 +52,15 @@ export const WorldParameters = {
 }
 
 export const TrailParameters = {
-    minDistance: 0.1,
-    duration: 0.1,
+    stepSize: 0.1,
     baseWidth: 0.15,
     baseAlpha: 0.1,
     thrustAlpha: 0.9,
     thrustActivationAttack: 7.0,
     thrustActivationDecay: 0.25,
-    burstActivationDecay: 0.05,
+    burstActivationDecay: 0.2,
     deathSegmentsDecay: 0.5,
     deathAlphaDelta: -4,
+    deathLightIntensity: 3,
+    deathLightIntensityDelta: -2,
 }

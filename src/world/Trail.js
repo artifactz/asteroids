@@ -16,6 +16,7 @@ export class Trail {
         this.geometry = new THREE.BufferGeometry();
         this.material = new THREE.ShaderMaterial({
             transparent: true,
+            depthWrite: false,
             blending: THREE.AdditiveBlending,
             uniforms: {
                 thrust: { value: 0 },
@@ -44,7 +45,10 @@ export class Trail {
                     vec3 inColor = mix(blue, white, whiteness);
                     vec3 color = mix(blue, inColor, spinalSq);
 
-                    float a = clamp((baseAlpha + thrustAlpha * whiteness) / 1.1 * spinalSq, 0.0, 1.0);
+                    float a = clamp(
+                        (baseAlpha + thrustAlpha * whiteness) / (baseAlpha + thrustAlpha) * spinalSq * vUv.x * vUv.x * vUv.x,
+                        0.0, 1.0
+                    );
 
                     gl_FragColor = vec4(color.r, color.g, color.b, a);
                 }
@@ -61,6 +65,7 @@ export class Trail {
         this.smoothThrust = 0;
         this.noisySmoothThrust = 0;
         this.smoothBurst = 0;
+        this.isPlayerAlive = true;
         this.deathSegments = null;
     }
 
@@ -69,16 +74,9 @@ export class Trail {
      */
     update(time, dt) {
         this.updateState(time, dt);
-
         this.updateGeometry(dt);
-        this.material.uniforms.thrust.value = this.noisySmoothThrust;
-        this.material.uniforms.baseAlpha.value = this.baseAlpha;
-        this.material.uniforms.thrustAlpha.value = this.thrustAlpha;
-
-        const forward = new THREE.Vector3(Math.cos(this.player.rotation.z), Math.sin(this.player.rotation.z), 0);
-        this.light.position.copy(this.player.position.clone().addScaledVector(forward, -0.9));
-        this.light.intensity = 3 * this.smoothThrust;
-
+        this.updateMaterial();
+        this.updateLight(dt);
         this.spawnParticles(dt);
     }
 
@@ -99,12 +97,17 @@ export class Trail {
         const bDecay = Math.pow(TrailParameters.burstActivationDecay, dt);
         this.smoothBurst = Math.max(this.smoothBurst * bDecay, newThrust - oldThrust);
 
-        const w1 = 0.01, w2 = 0.02, w3 = this.smoothBurst * 0.4, w4 = this.smoothBurst * 0.64
+        const w1 = 0.02, w2 = 0.03;
+        const w3 = 0.5 * Math.min(this.smoothBurst, 0.3);
+        const w4 = 0.5 * Math.min(this.smoothBurst * 0.5, 0.3);
+        const w5 = 0.667 * Math.min(this.smoothBurst * 1.5, 0.25);
         const noise = w1 * Math.sin(23 * time) - w1 +
                       w2 * Math.sin(101 * time) - w2 +
-                      w3 * Math.sin(39 * time) - w3 +
-                      w4 * Math.sin(78 * time) - w4;
+                      w3 * Math.sin(11 * time) - w3 +
+                      w4 * Math.sin(39 * time) - w4 +
+                      w5 * Math.sin(57 * time) - w5;
         this.noisySmoothThrust = Math.max(0, Math.min(1, this.smoothThrust + noise));
+        // console.log(this.smoothBurst);
 
         // Fade out on death
         if (!this.player.userData.isAlive) {
@@ -123,7 +126,6 @@ export class Trail {
         const positions = [];
         const uvs = [];
 
-        const stepSize = 0.1;
         let segments = 8 + Math.floor(6 * this.player.userData.speed + 10 * this.noisySmoothThrust);;
 
         // Fade out on death
@@ -134,14 +136,14 @@ export class Trail {
             segments = Math.round(this.deathSegments);
         }
 
-        let basePoint = new THREE.Vector3(0, 0, 0);
+        let basePoint = new THREE.Vector3(-0.3, 0, 0.05);
         let baseAngle = Math.PI;
         let orthoAngle = 0.5 * Math.PI;
         let a, b, c, d; // corners
 
         for (let i = 0; i < segments; i++) {
             const step = new THREE.Vector3(Math.cos(baseAngle), Math.sin(baseAngle), 0);
-            const nextPoint = basePoint.clone().addScaledVector(step, stepSize);
+            const nextPoint = basePoint.clone().addScaledVector(step, TrailParameters.stepSize);
             const sideStep = new THREE.Vector3(Math.cos(orthoAngle), Math.sin(orthoAngle), 0);
             const s = i / segments, t = (i + 1) / segments;
             const width1 = (1 - s) * TrailParameters.baseWidth;
@@ -176,6 +178,29 @@ export class Trail {
         this.mesh.rotation.copy(this.player.rotation);
     }
 
+    updateMaterial() {
+        this.material.uniforms.thrust.value = this.noisySmoothThrust;
+        this.material.uniforms.baseAlpha.value = this.baseAlpha;
+        this.material.uniforms.thrustAlpha.value = this.thrustAlpha;
+    }
+
+    updateLight(dt) {
+        this.light.position.set(
+            this.player.position.x - 0.9 * Math.cos(this.player.rotation.z),
+            this.player.position.y - 0.9 * Math.sin(this.player.rotation.z),
+            0.1
+        );
+        if (this.player.userData.isAlive) {
+            this.light.intensity = 3 * this.smoothThrust;
+        } else {
+            this.light.intensity = Math.max(0, this.light.intensity + TrailParameters.deathLightIntensityDelta * dt)
+            if (this.isPlayerAlive) {
+                this.light.intensity = TrailParameters.deathLightIntensity;
+            }
+        }
+        this.isPlayerAlive = this.player.userData.isAlive;
+    }
+
     spawnParticles(dt) {
         if (!this.player.userData.isAlive) { return; }
 
@@ -194,8 +219,8 @@ export class Trail {
                 this.player.position.z
             );
             velocities.push(
-                vel.x + (0.5 - 0.5 * this.smoothBurst) * lateral.x,
-                vel.y + (0.5 - 0.5 * this.smoothBurst) * lateral.y,
+                vel.x + (1.1 + 2.0 * this.smoothBurst) * lateral.x,
+                vel.y + (1.1 + 2.0 * this.smoothBurst) * lateral.y,
                 Math.random()
             );
         }
