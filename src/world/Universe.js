@@ -43,18 +43,22 @@ export class Universe {
         const geometry = new THREE.PlaneGeometry(size, size);
         const texture = this.nebulaGenerator.getTile(tileX, tileY, resolution, brightness, rootCellSize, iterations, details, density, material);
         texture.colorSpace = THREE.SRGBColorSpace;
-        console.log("Created texture");
         const textureMaterial = new THREE.MeshBasicMaterial({ map: texture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
         const mesh = new THREE.Mesh(geometry, textureMaterial);
         return mesh;
     }
 }
 
+/**
+ * A layer of the universe consisting of tiles at a fixed z coordinate.
+ */
 export class UniverseLayer {
     /**
-     * 
-     * @param {number} z
-     * @param {THREE.Camera} camera 
+     * @param {number} z Z coordinate of the layer.
+     * @param {THREE.Scene} scene Scene to add tiles to.
+     * @param {THREE.Camera} camera Camera used to determine visible area.
+     * @param {function(number, number, number):THREE.Mesh} meshGenerator Function that generates a mesh for a tile of given size and coordinates.
+     * @param {class} tileType Class of tile to create.
      */
     constructor(z, scene, camera, meshGenerator, tileType = UniverseTile) {
         this.z = z;
@@ -64,6 +68,7 @@ export class UniverseLayer {
         const depth = -z + camera.position.z;
         this.tileSize = 2 * Math.tan(0.5 * camera.fov / 180 * Math.PI) * depth;
         this.tiles = new Map();
+        this.lastVisibleTiles = null;
     }
 
     /**
@@ -83,17 +88,25 @@ export class UniverseLayer {
         ];
     }
 
+    /**
+     * Updates visible tiles based on camera position.
+     */
     update(camera) {
         const [left, right, bottom, top] = this.getVisibleTiles(camera);
-        for (let col = left - 1; col <= right + 1; col++) {
-            this.disableTile((bottom - 1), col);
-            this.disableTile((top + 1, col));
-        }
-        for (let row = bottom; row <= top; row++) {
-            this.disableTile(row, (left - 1));
-            this.disableTile(row, (right + 1));
+
+        if (this.lastVisibleTiles) {
+            // Disable tiles that are no longer visible
+            const [lastLeft, lastRight, lastBottom, lastTop] = this.lastVisibleTiles;
+            for (let col = lastLeft; col < lastRight + 1; col++) {
+                for (let row = lastBottom; row < lastTop + 1; row++) {
+                    if (col < left || col > right || row < bottom || row > top) {
+                        this.disableTile(row, col);
+                    }
+                }
+            }
         }
 
+        // Enable tiles that are now visible
         for (let col = left; col < right + 1; col++) {
             for (let row = bottom; row < top + 1; row++) {
                 this.enableTile(row, col);
@@ -101,6 +114,8 @@ export class UniverseLayer {
                 if (tile.update) { tile.update(camera); }
             }
         }
+
+        this.lastVisibleTiles = [left, right, bottom, top];
     }
 
     disableTile(row, col) {
@@ -115,11 +130,9 @@ export class UniverseLayer {
     enableTile(row, col) {
         const id = row + "," + col;
         if (!this.tiles.has(id)) {
-            // if (row != 0 || col != 0) { return; } // DEBUG
             // console.log("Generating tile " + id + " at z=" + this.z);
             const mesh = this.meshGenerator(this.tileSize, col, row);
             if (mesh) { mesh.position.add(new THREE.Vector3(col * this.tileSize, row * this.tileSize, this.z)); }
-            // const tile = { mesh, visible: true };
             const tile = new this.tileType(mesh);
             this.tiles.set(id, tile);
             if (tile.mesh) { this.scene.add(tile.mesh); }
@@ -180,7 +193,9 @@ function createBrightStarTextureMesh(size) {
     const group = new THREE.Group();
     const mesh = new THREE.Mesh(geometry, material);
     group.add(mesh);
-    group.add(new THREE.PointLight(0xffffff, 100, 200, 1.25));
+    const light = new THREE.PointLight(0xffffff, 100, 200, 1.25);
+    light.userData.type = "bright star";
+    group.add(light);
     group.position.set(
         -0.5 * starSize + Math.random() * (size - starSize),
         -0.5 * starSize + Math.random() * (size - starSize),
