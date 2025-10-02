@@ -124,9 +124,10 @@ export class SmokeLighting {
 
         if (lights.length > this.maxLights) {
             // Keep lights close to screen center
-            lights = lights.sort((a, b) => {
-                return a.position.x * a.position.x + a.position.y * a.position.y - b.position.x * b.position.x + b.position.y * b.position.y
-            }).slice(0, this.maxLights);
+            lights = lights.sort((a, b) =>
+                (a.position.x * a.position.x + a.position.y * a.position.y) - (b.position.x * b.position.x + b.position.y * b.position.y)
+            )
+            lights = lights.slice(0, this.maxLights);
         }
 
         this.smokeLightingMaterial.uniforms.numLights.value = lights.length;
