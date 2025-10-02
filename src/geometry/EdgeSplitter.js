@@ -198,14 +198,25 @@ function isInBounds(u, v, w, positions, tolerance) {
  * @return {number} Squared distance from point u to line segment (v, w)
  */
 function pointToSegmentDistanceSquared(u, v, w, positions) {
-    const a = new THREE.Vector3().fromArray(positions, 3 * u);
-    const b = new THREE.Vector3().fromArray(positions, 3 * v);
-    const c = new THREE.Vector3().fromArray(positions, 3 * w);
-    const vw = new THREE.Vector3().subVectors(c, b);
-    const vu = new THREE.Vector3().subVectors(a, b);
-    const t = THREE.MathUtils.clamp(vu.dot(vw) / vw.lengthSq(), 0, 1);
-    const closest = new THREE.Vector3().copy(vw).multiplyScalar(t).add(b);
-    return a.distanceToSquared(closest);
+    // Avoid GC
+    const f = pointToSegmentDistanceSquared;
+    if (f.a === undefined) {
+        f.a = new THREE.Vector3();
+        f.b = new THREE.Vector3();
+        f.c = new THREE.Vector3();
+        f.vw = new THREE.Vector3();
+        f.vu = new THREE.Vector3();
+        f.closest = new THREE.Vector3();
+    }
+
+    f.a.fromArray(positions, 3 * u);
+    f.b.fromArray(positions, 3 * v);
+    f.c.fromArray(positions, 3 * w);
+    f.vw.subVectors(f.c, f.b);
+    f.vu.subVectors(f.a, f.b);
+    const t = THREE.MathUtils.clamp(f.vu.dot(f.vw) / f.vw.lengthSq(), 0, 1);
+    f.closest.copy(f.vw).multiplyScalar(t).add(f.b);
+    return f.a.distanceToSquared(f.closest);
 }
 
 function canonicalEdgeKey(u, v) {

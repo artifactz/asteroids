@@ -59,9 +59,10 @@ export function moveCamera(world, aimPoint, dt) {
             (a) => Math.exp(-distanceFallofoff * Math.max(0, world.player.position.clone().sub(a.position).length() - distanceCutoff))
         );
         const weightsIter = weights.values();
+        const vec2 = new THREE.Vector2(); // Avoid GC
         const weightedSum = world.asteroids
             .map((a) => a.position)
-            .reduce((a, b) => a.addScaledVector(new THREE.Vector2(b.x, b.y).sub(destination), weightsIter.next().value), new THREE.Vector2());
+            .reduce((a, b) => a.addScaledVector(vec2.set(b.x, b.y).sub(destination), weightsIter.next().value), new THREE.Vector2());
         const weightsTotal = weights.reduce((a, b) => a + b, 0);
         const asteroidsMean = weightedSum.multiplyScalar(1 / (weightsTotal * world.asteroids.length));
         asteroidsMean.multiplyScalar(1 - Math.exp(-asteroidPull * weightsTotal));
