@@ -110,7 +110,9 @@ export class ParticleSystem {
         this.addColorParticleChunk(positions, velocities, 3.0, 2.0, 0, 0.85, 0x696969, THREE.NormalBlending, 0.025, true);
 
         // Smoke
-        const smoke = generateImpactDebris(impact.point, generalDirection, 8, 0, 0.3);
+        const origin = impact.point.clone();
+        origin.z += 0.1;
+        const smoke = generateImpactDebris(origin, generalDirection, 8, 0, 0.3);
         let lifetime = 3 + 3 * Math.random();
         this.addTextureParticleChunk(smoke.positions, smoke.velocities, lifetime, 30.0, 0.25, 0.7, this.smokeTexture, THREE.NormalBlending, 0.25, 1);
     }
@@ -282,6 +284,7 @@ export class ParticleSystem {
                     resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
                     size: { value: size },
                     opacity: { value: 1 },
+                    userData: { type: "lit point" }
                 },
                 vertexShader: this.pointMaterialVertexShader,
                 fragmentShader: this.coloredPointMaterialFragmentShader,
@@ -295,7 +298,8 @@ export class ParticleSystem {
                 transparent: true,
                 opacity: 1,
                 depthWrite: false,
-                blending: blending
+                blending: blending,
+                userData: { type: "unlit point" }
             });
 
         this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, velocityDecay, material, (enableLighting) ? 1 : 0);
@@ -317,6 +321,7 @@ export class ParticleSystem {
             blending: blending,
             transparent: true,
             depthWrite: false,
+            userData: { type: "texture" }
         });
 
         this.addParticleChunk(positions, velocities, lifetime, fadeoutTime, growthRate, velocityDecay, material, layer);
@@ -338,7 +343,7 @@ export class ParticleSystem {
         geometry.setAttribute("velocity", new THREE.Float32BufferAttribute(velocities, 3));
 
         const particles = new THREE.Points(geometry, material);
-        particles.userData = { lifetime, fadeoutTime, growthRate, velocityDecay, age: 0 };
+        particles.userData = { lifetime, fadeoutTime, growthRate, velocityDecay, age: 0, type: `${material.userData.type} particle` };
         if (layer != 0) {
             particles.layers.disable(0);
             particles.layers.enable(layer);
