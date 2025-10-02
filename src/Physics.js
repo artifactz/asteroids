@@ -1,6 +1,6 @@
 import Ammo from 'ammo.js';
 import * as THREE from 'three';
-import { iteratePoints } from './geometry/GeometryUtils.js';
+import { iteratePointsLocal } from './geometry/GeometryUtils.js';
 
 
 /**
@@ -327,7 +327,7 @@ function shapeFromMesh(mesh) {
     shape.setMargin(0);
 
     let vertex = null;
-    for (const vector of iteratePoints(mesh)) {
+    for (const vector of iteratePointsLocal(mesh)) {
         if (vertex) {
             // Add point but skip "recalculateLocalAabb"
             shape.addPoint(vertex, false);

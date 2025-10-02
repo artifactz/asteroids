@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { computeMeshVolume } from 'three-bvh-csg';
-import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
+import { addBarycentricCoordinates, SurfaceSampler } from '../geometry/GeometryUtils.js';
 import { AsteroidParameters } from '../Parameters.js';
 
 
@@ -78,6 +78,7 @@ export function createAsteroid(geometry, rotationSpeed = 0.4, randomHealth = 15)
         materialValue: 2.5,
         splitAge: null,
         isBitten: false,
+        surfaceSampler: new SurfaceSampler(geometry),
         type: "asteroid",
     };
 

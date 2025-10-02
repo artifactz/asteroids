@@ -18,16 +18,22 @@ export function* iterateTriangles(geometry) {
  * Iterates over Vector3 points of a mesh or group (and its sub-groups) in the local coordinate frame of the given object.
  * @param {THREE.Group | THREE.Mesh} group
  */
-export function* iteratePoints(group) {
+export function* iteratePointsLocal(group) {
+    // Avoid GC
+    const f = iteratePointsLocal;
+    if (f.result === undefined) {
+        f.result = new THREE.Vector3();
+    }
+
     if (group instanceof THREE.Mesh) {
         const mesh = group;
         const pos = mesh.geometry.attributes.position;
         for (let i = 0; i < pos.count; i++) {
-            yield new THREE.Vector3().fromBufferAttribute(pos, i);
+            yield f.result.fromBufferAttribute(pos, i);
         }
     } else if (group.children) {
         for (const child of group.children) {
-            for (const point of iteratePoints(child)) {
+            for (const point of iteratePointsLocal(child)) {
                 point.applyEuler(child.rotation);
                 point.multiply(child.scale);
                 point.add(child.position);
@@ -36,6 +42,12 @@ export function* iteratePoints(group) {
         }
     } else {
         throw new Error("Unsupported group type for iteratePoints");
+    }
+}
+
+export function* iteratePointsWorld(group) {
+    for (const point of iteratePointsLocal(group)) {
+        yield point.applyMatrix4(group.matrixWorld);
     }
 }
 

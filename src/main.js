@@ -27,27 +27,41 @@ const fps = {
     }
 }
 
-const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('three-canvas'), antialias: false });
+const renderer = new THREE.WebGLRenderer({
+    canvas: document.getElementById('three-canvas'),
+    antialias: false,
+    powerPreference: "high-performance",
+    logarithmicDepthBuffer: false,
+    precision: "highp"
+});
 renderer.autoClear = false;
 renderer.setSize(window.innerWidth, window.innerHeight);
 
 initHud();
 
-// Off-screen render target used to access main scene depth buffer
-const renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+// Off-screen render target used to access main scene depth buffer (and by SSAA to render samples)
+const ssaaSampleRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
     format: THREE.RGBAFormat,
     type: THREE.HalfFloatType,
     depthBuffer: true,
 });
-renderTarget.depthTexture = new THREE.DepthTexture();
-renderTarget.depthTexture.format = THREE.DepthFormat;
-renderTarget.depthTexture.type = THREE.UnsignedShortType;
+ssaaSampleRenderTarget.depthTexture = new THREE.DepthTexture();
+ssaaSampleRenderTarget.depthTexture.format = THREE.DepthFormat;
+ssaaSampleRenderTarget.depthTexture.type = THREE.UnsignedShortType;
 
-const world = new World(renderer, renderTarget.depthTexture);
+// Off-screen render target used to sum up SSAA samples
+const ssaaResultRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+    format: THREE.RGBAFormat,
+    type: THREE.HalfFloatType,
+    depthBuffer: false,
+});
+
+const world = new World(renderer, ssaaSampleRenderTarget.depthTexture);
 
 const blend = new Blend(THREE.NormalBlending);
 const smokeLighting = new SmokeLighting();
 const ssaa = new SSAARenderPass(world.scene, world.camera);
+ssaa._sampleRenderTarget = ssaaSampleRenderTarget;
 
 const controller = new GameController(world);
 
@@ -66,22 +80,22 @@ window.addEventListener('resize', () => {
     world.camera.aspect = w / h;
     world.camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-    renderTarget.setSize(w, h);
+    ssaaSampleRenderTarget.setSize(w, h);
+    ssaaResultRenderTarget.setSize(w, h);
     smokeLighting.setSize(w, h);
-    ssaa.setSize(w, h);
 });
 
 /** Renders world scene and lit smoke. */
 function render(scene, camera) {
-    renderer.setRenderTarget(renderTarget);
-    renderer.setClearColor(world.clearColor);
-    renderer.clear();
-    // Render main scene layer to renderTarget using super-sampling AA (readBuffer argument is only used for buffer sizes)
-    ssaa.render(renderer, renderTarget, renderTarget);
+    // Render main scene layer using super-sampling AA (readBuffer argument is only used for buffer sizes)
+    // NOTE: Rendering SSAA directly to the screen (null) looks like it uses incorrect color space
+    ssaa.render(renderer, ssaaResultRenderTarget, ssaaResultRenderTarget);
 
+    // Render result to screen
     renderer.setRenderTarget(null);
-    blend.render(renderer, renderTarget.texture);
+    blend.render(renderer, ssaaResultRenderTarget.texture);
 
+    // Render smoke on top
     smokeLighting.render(renderer, scene, camera);
 }
 
