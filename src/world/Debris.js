@@ -105,21 +105,11 @@ export class DebrisManager {
             }
 
             if (debris.material === debrisMaterial) {
-                // Move to instanced
-                const instancedMesh = this.instancedMeshes[debris.userData.geometryIndex];
-                const i = instancedMesh.count++;
-                instancedMesh.setMatrixAt(i, debris.matrixWorld);
-                instancedMesh.instanceMatrix.needsUpdate = true;
-                instancedMesh.computeBoundingBox(); // won't render otherwise
-                instancedMesh.computeBoundingSphere();
-                debris.userData.isUnique = false;
-                this.instancedData[debris.userData.geometryIndex].push({
-                    position: debris.position, quaternion: debris.quaternion, userData: debris.userData
-                });
-                this.scene.remove(debris);
+                // Move to instanced when not transforming or fading
+                this.moveToInstanced(debris);
             }
 
-            if (debris.userData.isRemoved) {
+            if (debris.userData.isRemoved || !debris.userData.isUnique) {
                 this.scene.remove(debris);
             }
         }
@@ -127,6 +117,27 @@ export class DebrisManager {
         this.uniqueDebris = this.uniqueDebris.filter(d => !d.userData.isRemoved && d.userData.isUnique);
 
         return { newTakes, takenMaterial };
+    }
+
+    moveToInstanced(debris) {
+        const instancedMesh = this.instancedMeshes[debris.userData.geometryIndex];
+        const i = instancedMesh.count++;
+        instancedMesh.setMatrixAt(i, debris.matrixWorld);
+        instancedMesh.instanceMatrix.needsUpdate = true;
+        instancedMesh.computeBoundingBox(); // won't render otherwise
+        instancedMesh.computeBoundingSphere();
+        debris.userData.isUnique = false;
+        // Create mesh replacement object
+        const debrisData = {
+            position: debris.position, quaternion: debris.quaternion, userData: debris.userData
+        };
+        this.instancedData[debris.userData.geometryIndex].push(debrisData);
+        // Update reference physics reference
+        if (this.removeDebrisPhysics(debris)) {
+            this.physics.add(debrisData, undefined, false);
+            debrisData.userData.isPhysicsControlled = true;
+        }
+        console.log("Moving to instanced rendering");
     }
 
     updateInstanced(time, dt, playerPosition) {
@@ -140,25 +151,16 @@ export class DebrisManager {
                 const geometryIndex = debris.userData.geometryIndex;
                 const instancedMesh = this.instancedMeshes[geometryIndex];
 
-                if (this.beginTakeDebris(debris, playerPosition)) {
-                    newTakes++;
-                    // Set pose from instance matrix, in case it was changed while stale
-                    instancedMesh.getMatrixAt(i, matrix);
-                    matrix.decompose(debris.position, debris.quaternion, new THREE.Vector3());
-                    debris.userData.takeOriginalPosition = debris.position.clone();
-                };
+                if (this.beginTakeDebris(debris, playerPosition)) { newTakes++; };
                 takenMaterial += this.takeDebris(debris, playerPosition, dt);
                 this.checkStale(debris);
 
                 if (time > debris.userData.timestamp + debris.userData.ttl - debris.userData.fadeoutTime) {
                     // Move to unique for fadeout
-                    const material = debrisMaterial.clone();
-                    const mesh = new THREE.Mesh(instancedMesh.geometry, material);
-                    this.addUniqueDebris(mesh, debris, false);
-                    debris.userData.isRemoved = true;
+                    this.moveToUnique(debris);
                 }
 
-                if (debris.userData.isRemoved) {
+                if (debris.userData.isRemoved || debris.userData.isUnique) {
                     this.removeInstance(geometryIndex, i);
                     i--;
 
@@ -172,6 +174,15 @@ export class DebrisManager {
         }
 
         return { newTakes, takenMaterial };
+    }
+
+    moveToUnique(debris) {
+        this.removeDebrisPhysics(debris);
+        const material = debrisMaterial.clone();
+        const mesh = new THREE.Mesh(this.instancedMeshes[debris.userData.geometryIndex].geometry, material);
+        this.addUniqueDebris(mesh, debris, debris.userData.isPhysicsControlled);
+        debris.userData.isUnique = true;
+        console.log("Moving to unique for fadeout");
     }
 
     removeInstance(geometryIndex, instanceIndex) {
@@ -245,7 +256,9 @@ export class DebrisManager {
         if (debris.userData.isPhysicsControlled) {
             this.physics.remove(debris);
             debris.userData.isPhysicsControlled = false;
+            return true;
         }
+        return false;
     }
 }
 
