@@ -12,6 +12,7 @@ import { Sounds } from '../Sounds.js';
 import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
 import { WorldParameters } from '../Parameters.js';
 import { Trail } from './Trail.js';
+import { LightPool } from '../LightPool.js';
 
 // Set up accelerated laser/asteroid collision detection
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -33,14 +34,15 @@ export class World {
         this.clearColor = new THREE.Color(0x000000);
         this.camera = this.createCamera();
         this.addDefaultLights(this.scene);
-        this.universe = new Universe(this.scene, this.camera, renderer);
         this.player = this.createPlayer();
         this.scene.add(this.player);
 
         this.asteroids = [];
         this.lasers = [];
+        this.lights = new LightPool(this.scene);
+        this.universe = new Universe(this.scene, this.camera, this.lights, renderer);
         this.debris = new DebrisManager(this.scene, this.physics);
-        this.particles = new ParticleSystem(this.scene, this.camera, depthTexture);
+        this.particles = new ParticleSystem(this.scene, this.lights, depthTexture);
         this.trail = new Trail(this.scene, this.player, this.particles);
         this.sounds = new Sounds();
 
@@ -136,6 +138,7 @@ export class World {
         this.addAsteroid(asteroid);
 
         // console.log("Spawned asteroid distanceToPlayer=" + asteroid.position.clone().sub(this.player.position).length());
+        return asteroid;
     }
 
     /**
@@ -294,12 +297,10 @@ export class World {
         laser.userData.ttl = ttl;
         laser.userData.damage = damage;
 
-        const light = new THREE.PointLight(0xff6666, 1, 10, 1.25);
-        light.position.copy(laser.position);
+        const light = this.lights.add({ position: laser.position, attachMesh: laser, color: 0xff6666, intensity: 1, distance: 10, decay: 1.25 });
         laser.userData.light = light;
 
         this.lasers.push(laser);
-        this.scene.add(light);
         this.scene.add(laser);
 
         return laser;
@@ -312,7 +313,6 @@ export class World {
                 this.removeLaser(laser);
             } else {
                 laser.position.addScaledVector(laser.userData.velocity, dt);
-                laser.userData.light.position.copy(laser.position);
 
                 const hit = checkLaserHit(laser, this.asteroids, dt);
                 if (hit) {
@@ -327,7 +327,7 @@ export class World {
     removeLaser(laser) {
         if (laser.userData.isRemoved) { return; }
         this.scene.remove(laser);
-        this.scene.remove(laser.userData.light);
+        this.lights.remove(laser.userData.light);
         laser.userData.isRemoved = true;
     }
 
@@ -366,6 +366,12 @@ export class World {
 
     handleSplitWorkerResponse(message) {
         const parentAsteroid = this.asteroids.find((a) => a.uuid == message.data.parentUuid);
+        if (!parentAsteroid) {
+            // Apparently might happen after window was inactive for a while
+            console.warn("Skipping obsolete asteroid split response");
+            return;
+        }
+
         const splitAsteroids = [];
         let exploded = false;
         let sign = 1;

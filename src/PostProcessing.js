@@ -52,13 +52,18 @@ export class SmokeLighting {
                     vec4 smoke = texture2D(tSmoke, vUv);
                     if (smoke.a == 0.0) { discard; }
                     vec3 litColor = smoke.rgb;
+                    float translucence = 1.0 - smoke.a * smoke.a;
+                    float translucenceWeight = 0.4 * translucence + 0.6;
 
                     for (int i = 0; i < numLights; i++) {
                         vec2 lightUV = lightUVs[i];
                         float dist = distance(vUv, lightUV);
                         float falloff = exp(-lightFalloffRatios[i] * dist);
-                        litColor += lightColors[i] * lightIntensities[i] * falloff;
+                        litColor += lightColors[i] * lightIntensities[i] * translucenceWeight * falloff;
                     }
+
+                    float density = 0.2 * (smoke.a * smoke.a * smoke.a);
+                    litColor -= vec3(density, density, density);
 
                     gl_FragColor = vec4(litColor, smoke.a);
                 }
@@ -101,6 +106,8 @@ export class SmokeLighting {
             if (element instanceof THREE.PointLight) {
                 const light = element;
 
+                if (light.intensity == 0) { return; }
+
                 // Convert light position to screen coordinates
                 const vector = new THREE.Vector3();
                 vector.setFromMatrixPosition(light.matrixWorld);
@@ -116,7 +123,7 @@ export class SmokeLighting {
                     position: new THREE.Vector2(vector.x, vector.y),
                     color: light.color,
                     // Lights further from z=0 are weaker and have less falloff
-                    intensity: light.intensity * Math.exp(-Math.abs(0.1 * z)),
+                    intensity: 1.3 * light.intensity * Math.exp(-Math.abs(0.11 * z)),
                     falloffRatio: 18.0 * Math.exp(-Math.abs(0.015 * z))
                 });
             }

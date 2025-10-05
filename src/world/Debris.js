@@ -57,7 +57,9 @@ export class DebrisManager {
         const mesh = new THREE.Mesh(this.instancedMeshes[geometryIndex].geometry, debrisMaterial.clone());
         const debrisData = createDebrisData(asteroid, materialValue, timestamp, byLaser);
         debrisData.userData.geometryIndex = geometryIndex;
-        this.addUniqueDebris(mesh, debrisData)
+        this.addUniqueDebris(mesh, debrisData);
+
+        return mesh;
     }
 
     addUniqueDebris(mesh, { position, quaternion, userData }, physics = true) {
@@ -137,7 +139,7 @@ export class DebrisManager {
             this.physics.add(debrisData, undefined, false);
             debrisData.userData.isPhysicsControlled = true;
         }
-        console.log("Moving to instanced rendering");
+        // console.log("Moving to instanced rendering");
     }
 
     updateInstanced(time, dt, playerPosition) {
@@ -182,7 +184,7 @@ export class DebrisManager {
         const mesh = new THREE.Mesh(this.instancedMeshes[debris.userData.geometryIndex].geometry, material);
         this.addUniqueDebris(mesh, debris, debris.userData.isPhysicsControlled);
         debris.userData.isUnique = true;
-        console.log("Moving to unique for fadeout");
+        // console.log("Moving to unique for fadeout");
     }
 
     removeInstance(geometryIndex, instanceIndex) {

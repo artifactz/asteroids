@@ -137,6 +137,7 @@ export class GameController {
         this.world.trail.update(this.world.time, dt);
         this.updateCamera(mouse, this.world.time, dt);
         this.world.updateUniverse();
+        this.world.lights.update(dt);
 
         // Update UI
         if (this.state == GameState.Playing) {

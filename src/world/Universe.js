@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { NebulaGenerator, NebulaMaterials } from '../Nebula.js'
+import { LightPool } from '../LightPool.js';
 
 const textureLoader = new THREE.TextureLoader()
 const brightStarTexture = textureLoader.load('media/bright_star.png');
@@ -7,7 +8,7 @@ brightStarTexture.colorSpace = THREE.SRGBColorSpace;
 
 
 export class Universe {
-    constructor(scene, camera, renderer) {
+    constructor(scene, camera, lights, renderer) {
         this.nebulaGenerator = new NebulaGenerator(renderer);
         this.layers = [
             new UniverseLayer(-150, scene, camera, (size) => { return createPointStarMesh(size, 40, 0, 50); }),
@@ -25,7 +26,11 @@ export class Universe {
 
             new UniverseLayer(-500, scene, camera, (size) => { return createPointStarMesh(size, 500, 0, 300, 0xfff0f0, 0.55); }),
 
-            new UniverseLayer(-50, scene, camera, (size) => { return Math.random() < 0.5 ? createBrightStarTextureMesh(size) : null; }, RotatingUniverseTile),
+            new UniverseLayer(
+                -50, scene, camera,
+                (size) => { return Math.random() < 0.5 ? createBrightStarTextureMesh(size) : null; },
+                () => { return new LightRotatingUniverseTile(lights) }
+            ),
 
             new UniverseLayer(-60, scene, camera, (size, tileX, tileY) => { return this.createNebulaMesh(size, tileX, tileY, 600, 0.5, 1.5, 8, 0.6, 0.5); }),
             new UniverseLayer(-130, scene, camera, (size, tileX, tileY) => { return this.createNebulaMesh(size, tileX, tileY, 800, 0.5, 0.5, 8, 0.6, 0.5); }),
@@ -57,14 +62,14 @@ export class UniverseLayer {
      * @param {number} z Z coordinate of the layer.
      * @param {THREE.Scene} scene Scene to add tiles to.
      * @param {THREE.Camera} camera Camera used to determine visible area.
-     * @param {function(number, number, number):THREE.Mesh} meshGenerator Function that generates a mesh for a tile of given size and coordinates.
-     * @param {class} tileType Class of tile to create.
+     * @param {function(number, number, number):THREE.Mesh} meshFactory Function that generates a mesh for a tile of given size and coordinates.
+     * @param {function():UniverseTile} tileFactory Function that generates a tile object to hold state for each tile.
      */
-    constructor(z, scene, camera, meshGenerator, tileType = UniverseTile) {
+    constructor(z, scene, camera, meshFactory, tileFactory = () => { return new UniverseTile(); }) {
         this.z = z;
         this.scene = scene;
-        this.meshGenerator = meshGenerator;
-        this.tileType = tileType;
+        this.meshFactory = meshFactory;
+        this.tileFactory = tileFactory;
         const depth = -z + camera.position.z;
         this.tileSize = 2 * Math.tan(0.5 * camera.fov / 180 * Math.PI) * depth;
         this.tiles = new Map();
@@ -123,6 +128,7 @@ export class UniverseLayer {
         const tile = this.tiles.get(id);
         if (!tile || !tile.visible) { return; }
         if (tile.mesh) { this.scene.remove(tile.mesh); }
+        if (tile.disable) { tile.disable(); }
         tile.visible = false;
         // console.log("Disabled tile " + id + " at z=" + this.z);
     }
@@ -131,30 +137,64 @@ export class UniverseLayer {
         const id = row + "," + col;
         if (!this.tiles.has(id)) {
             // console.log("Generating tile " + id + " at z=" + this.z);
-            const mesh = this.meshGenerator(this.tileSize, col, row);
-            if (mesh) { mesh.position.add(new THREE.Vector3(col * this.tileSize, row * this.tileSize, this.z)); }
-            const tile = new this.tileType(mesh);
+            const tile = this.tileFactory();
             this.tiles.set(id, tile);
-            if (tile.mesh) { this.scene.add(tile.mesh); }
+            const mesh = this.meshFactory(this.tileSize, col, row);
+            if (mesh) {
+                mesh.position.add(new THREE.Vector3(col * this.tileSize, row * this.tileSize, this.z));
+                tile.mesh = mesh;
+                this.scene.add(tile.mesh);
+            }
+            if (tile.enable) { tile.enable(); }
         } else if (!this.tiles.get(id).visible) {
             const tile = this.tiles.get(id);
-            tile.visible = true;
             if (tile.mesh) { this.scene.add(tile.mesh); }
+            if (tile.enable) { tile.enable(); }
+            tile.visible = true;
         }
     }
 }
 
 class UniverseTile {
-    constructor(mesh) {
-        this.mesh = mesh;
+    constructor() {
+        this.mesh = null;
         this.visible = true;
     }
 }
 
-class RotatingUniverseTile extends UniverseTile {
+class LightRotatingUniverseTile extends UniverseTile {
+    /**
+     * @param {LightPool} lights
+     */
+    constructor(lights) {
+        super();
+        this.lights = lights;
+    }
+
     update(camera) {
+        const f = this.update;
+        if (!f.vec) {
+            f.vec = new THREE.Vector3();
+        }
+
         if (this.mesh) {
+            // Texture rotation
             this.mesh.rotation.z = Math.atan2(this.mesh.position.y - camera.position.y, this.mesh.position.x - camera.position.x);
+            // Light intensity
+            const distSq = f.vec.copy(this.mesh.position).sub(camera.position).lengthSq();  // in [3600..~25000]
+            this.light.intensity = 1e6 / (0.3 * distSq);
+        }
+    }
+
+    enable() {
+        if (this.mesh) {
+            this.light = this.lights.add({ attachMesh: this.mesh, color: 0xffffff, intensity: 100, distance: 200, decay: 1.25, tag: "bright star" });
+        }
+    }
+
+    disable() {
+        if (this.mesh) {
+            this.lights.remove(this.light);
         }
     }
 }
@@ -190,18 +230,13 @@ function createBrightStarTextureMesh(size) {
     const starSize = 55;
     const geometry = new THREE.PlaneGeometry(starSize, starSize);
     const material = new THREE.MeshBasicMaterial({ map: brightStarTexture, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
-    const group = new THREE.Group();
     const mesh = new THREE.Mesh(geometry, material);
-    group.add(mesh);
-    const light = new THREE.PointLight(0xffffff, 100, 200, 1.25);
-    light.userData.type = "bright star";
-    group.add(light);
-    group.position.set(
+    mesh.position.set(
         -0.5 * starSize + Math.random() * (size - starSize),
         -0.5 * starSize + Math.random() * (size - starSize),
         0
     );
-    return group;
+    return mesh;
 }
 
 function projectOnZ(vector, camera, z) {

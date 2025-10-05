@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { getRotatedPointVelocity, iteratePointsWorld, pointToLineDistanceSquared } from './geometry/GeometryUtils.js';
+import { LightPool } from './LightPool.js';
+import { ParticleParameters } from './Parameters.js';
 
 
 /**
@@ -7,14 +9,13 @@ import { getRotatedPointVelocity, iteratePointsWorld, pointToLineDistanceSquared
  */
 export class ParticleSystem {
     /**
-     * @param {THREE.Scene} scene 
-     * @param {THREE.Camera} camera 
+     * @param {THREE.Scene} scene The scene to which particles will be added.
+     * @param {LightPool} lights Light pool for adding lights for bright particles like sparks.
      * @param {THREE.DepthTexture} depthTexture  Particles are rendered separately, so we do z culling manually.
      */
-    constructor(scene, camera, depthTexture) {
+    constructor(scene, lights, depthTexture) {
         this.scene = scene;
-        this.cameraNear = camera.near;
-        this.cameraFar = camera.far;
+        this.lights = lights;
         this.depthTexture = depthTexture;
 
         this.pointMaterialVertexShader = `
@@ -29,8 +30,6 @@ export class ParticleSystem {
             uniform sampler2D tMap;
             uniform sampler2D tDepth;
             uniform float opacity;
-            uniform float cameraNear;
-            uniform float cameraFar;
             uniform vec2 resolution;
 
             void main() {
@@ -53,8 +52,6 @@ export class ParticleSystem {
             uniform vec3 color;
             uniform sampler2D tDepth;
             uniform float opacity;
-            uniform float cameraNear;
-            uniform float cameraFar;
             uniform vec2 resolution;
 
             void main() {
@@ -74,7 +71,6 @@ export class ParticleSystem {
         `;
 
         this.particleChunks = [];
-        this.lights = [];
 
         const textureLoader = new THREE.TextureLoader()
         textureLoader.load('media/smoke.png', (texture) => {
@@ -100,14 +96,22 @@ export class ParticleSystem {
 
         // Spark light
         const meanVelocity = getMeanVector3FromArray(sparkVelocities);
-        this.addLight(impact.point, meanVelocity, maxLifetime, maxLifetime - minLifetime);
+        this.lights.add({
+            position: impact.point,
+            velocity: meanVelocity,
+            ttl: maxLifetime,
+            fadeoutTime: maxLifetime - minLifetime,
+            color: 0xffcc66,
+            intensity: 1,
+            distance: 5
+        });
 
         // Debris
         const objPointVel = getRotatedPointVelocity(impact.point, asteroid);
         const awayFromCenter = impact.point.clone().sub(asteroid.position).normalize();
         const generalDirection = objPointVel.add(awayFromCenter.multiplyScalar(0.2));
         const { positions, velocities } = generateImpactDebris(impact.point, generalDirection, 50, 0.06, 0.2);
-        this.addColorParticleChunk(positions, velocities, 3.0, 2.0, 0, 0.85, 0x696969, THREE.NormalBlending, 0.025, true);
+        this.addColorParticleChunk(positions, velocities, 3.0, 2.0, 0, 0.85, ParticleParameters.asteroidColor, THREE.NormalBlending, 0.025, true);
 
         // Smoke
         const origin = impact.point.clone();
@@ -168,14 +172,14 @@ export class ParticleSystem {
         const { positions: slowPositions, velocities: slowVelocities } = generateSplitDebris(
             projectedPoints, asteroid.userData.velocity, impact, numFastDebrisParticles, 0.25, 0.1, 0.05);
         const slowDebrisLifetime = 3.5 + Math.random();
-        this.addColorParticleChunk(slowPositions, slowVelocities, slowDebrisLifetime, 3.0, 0, 0.9, 0x696969, THREE.NormalBlending, 0.025, true);
+        this.addColorParticleChunk(slowPositions, slowVelocities, slowDebrisLifetime, 3.0, 0, 0.9, ParticleParameters.asteroidColor, THREE.NormalBlending, 0.025, true);
 
         // Fast debris
         const numSlowDebrisParticles = Math.ceil(161 * diameter * diameter); // Different to "fast" because generateSplitDebris is deterministic
         const { positions: fastPositions, velocities: fastVelocities } = generateSplitDebris(
             projectedPoints, asteroid.userData.velocity, impact, numSlowDebrisParticles, 0.5, 0.01, 0.2);
         const fastDebrisLifetime = 1.0 + 0.5 * Math.random();
-        this.addColorParticleChunk(fastPositions, fastVelocities, fastDebrisLifetime, 1.0, 0, 1, 0x696969, THREE.NormalBlending, 0.025, true);
+        this.addColorParticleChunk(fastPositions, fastVelocities, fastDebrisLifetime, 1.0, 0, 1, ParticleParameters.asteroidColor, THREE.NormalBlending, 0.025, true);
     }
 
     handleAsteroidExplosion(asteroid) {
@@ -198,7 +202,7 @@ export class ParticleSystem {
                 debrisVelocities.push(vel.x, vel.y, vel.z);
             }
             const debrisLifetime = 4.0 + (1 * Math.random() - 0.5);
-            this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 3.0, 0, 1, 0x696969, THREE.NormalBlending, 0.025, true);
+            this.addColorParticleChunk(debrisPositions, debrisVelocities, debrisLifetime, 3.0, 0, 1, ParticleParameters.asteroidColor, THREE.NormalBlending, 0.025, true);
         }
 
         // Smoke
@@ -218,7 +222,7 @@ export class ParticleSystem {
 
     handleAsteroidCollision(asteroid, damage) {
         // Smoke
-        const numSmokeParticles = Math.ceil(0.75 * damage);
+        const numSmokeParticles = Math.min(35, Math.ceil(0.75 * damage));
         const smokePositions = [];
         const smokeVelocities = [];
         for (let j = 0; j < numSmokeParticles; j++) {
@@ -250,7 +254,7 @@ export class ParticleSystem {
             const debrisLifetime = 4 + 2 * Math.random();
             this.addColorParticleChunk(
                 positions.slice(posIdx, posIdx + velocities.length),
-                velocities, debrisLifetime, 3.0, 0, 1, 0x696969, THREE.NormalBlending, 0.025, true
+                velocities, debrisLifetime, 3.0, 0, 1, ParticleParameters.asteroidColor, THREE.NormalBlending, 0.025, true
             );
             posIdx += velocities.length;
         }
@@ -279,8 +283,6 @@ export class ParticleSystem {
                 uniforms: {
                     color: { value: new THREE.Color(color) },
                     tDepth: { value: this.depthTexture },
-                    cameraNear: { value: this.cameraNear },
-                    cameraFar: { value: this.cameraFar },
                     resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
                     size: { value: size },
                     opacity: { value: 1 },
@@ -310,8 +312,6 @@ export class ParticleSystem {
             uniforms: {
                 tMap: { value: texture },
                 tDepth: { value: this.depthTexture },
-                cameraNear: { value: this.cameraNear },
-                cameraFar: { value: this.cameraFar },
                 resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
                 size: { value: size },
                 opacity: { value: 1 },
@@ -353,20 +353,7 @@ export class ParticleSystem {
         this.particleChunks.push(particles);
     }
 
-    addLight(position, velocity, lifetime, fadeoutTime) {
-        const light = new THREE.PointLight(0xffcc66, 1, 5);
-        light.position.copy(position);
-        light.userData = { velocity, lifetime, fadeoutTime, age: 0 };
-        this.scene.add(light);
-        this.lights.push(light);
-    }
-
     update(dt) {
-        this.updateParticleChunks(dt);
-        this.updateLights(dt);
-    }
-
-    updateParticleChunks(dt) {
         for (const particles of this.particleChunks) {
             const pos = particles.geometry.attributes.position;
             const vel = particles.geometry.attributes.velocity;
@@ -399,23 +386,6 @@ export class ParticleSystem {
             }
         }
         this.particleChunks = this.particleChunks.filter(p => p.userData.age < p.userData.lifetime);
-    }
-
-    updateLights(dt) {
-        for (const light of this.lights) {
-            light.position.x += dt * light.userData.velocity.x;
-            light.position.y += dt * light.userData.velocity.y;
-            light.position.z += dt * light.userData.velocity.z;
-
-            light.userData.age += dt;
-            light.intensity = getFadeoutOpacity(light.userData);
-
-            if (light.userData.age >= light.userData.lifetime) {
-                this.scene.remove(light);
-            }
-        }
-
-        this.lights = this.lights.filter(light => light.userData.age < light.userData.lifetime);
     }
 }
 

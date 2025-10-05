@@ -106,9 +106,12 @@ function animateLoading() {
     render(scene, world.camera);
 
     if (world.particles.smokeTexture && world.player.children.length) {
-        for (const scene of world.loadingScenes()) {
-            render(scene, world.camera);
-        }
+        // Currently disabled in favor of LightPool
+        // for (const scene of world.loadingScenes()) {
+        //     renderer.compile(scene, world.camera);
+        //     render(scene, world.camera);
+        // }
+        renderer.compile(world.scene, world.camera);
 
         showGameStart();
         animate();

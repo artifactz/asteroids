@@ -16,6 +16,10 @@ export const AsteroidParameters = {
     materialRoughness: 1.0,
 }
 
+export const ParticleParameters = {
+    asteroidColor: 0xaaaaaa,
+}
+
 export const DebrisParameters = {
     radius: 0.09,
     noise: 0.7,
