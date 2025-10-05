@@ -16,6 +16,11 @@ body {
   height: 100%;
   display: block;
   background-color: black;
+
+  &.desaturated {
+    transition: filter 5s ease-in;
+    filter: saturate(0.3333);
+  }
 }
 
 #ui-overlay {

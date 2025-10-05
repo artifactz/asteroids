@@ -2,6 +2,7 @@ import { submitHighscore } from "./Highscore.js";
 
 const THRUST_NUM_SEGMENTS = 8;
 const thrustSegments = [];
+const canvas = document.getElementById('three-canvas');
 const thrustContainer = document.getElementById('thrust-bar-container');
 const gameStartContainer = document.getElementById('game-start-container');
 const gameOverContainer = document.getElementById('game-over-container');
@@ -91,6 +92,7 @@ export function showHighscores(data, playerScore) {
     highscoresContainer.classList.add("visible");
     thrustContainer.style.display = "none";
     materialContainer.style.display = "none";
+    canvas.classList.add("desaturated");
 }
 
 /**
