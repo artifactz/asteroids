@@ -53,7 +53,7 @@ export class SmokeLighting {
                     if (smoke.a == 0.0) { discard; }
                     vec3 litColor = smoke.rgb;
                     float translucence = 1.0 - smoke.a * smoke.a;
-                    float translucenceWeight = 0.4 * translucence + 0.6;
+                    float translucenceWeight = 0.2 * translucence + 0.8;
 
                     for (int i = 0; i < numLights; i++) {
                         vec2 lightUV = lightUVs[i];
@@ -62,7 +62,7 @@ export class SmokeLighting {
                         litColor += lightColors[i] * lightIntensities[i] * translucenceWeight * falloff;
                     }
 
-                    float density = 0.2 * (smoke.a * smoke.a * smoke.a);
+                    float density = 0.21 * (smoke.a * smoke.a * smoke.a);
                     litColor -= vec3(density, density, density);
 
                     gl_FragColor = vec4(litColor, smoke.a);
