@@ -38,27 +38,18 @@ export class MSAARenderer extends Renderer {
         this.msaaRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
             format: THREE.RGBAFormat,
             type: THREE.HalfFloatType,
-            samples: numSamples
-        });
-
-        this.depthRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
-            samples: 0,
+            samples: numSamples,
             depthBuffer: true,
-            format: THREE.RGBAFormat
         });
-        this.depthRenderTarget.depthTexture = new THREE.DepthTexture();
-        this.depthRenderTarget.depthTexture.format = THREE.DepthFormat;
-        this.depthRenderTarget.depthTexture.type = THREE.UnsignedShortType;
+        this.msaaRenderTarget.depthTexture = new THREE.DepthTexture();
+        this.msaaRenderTarget.depthTexture.format = THREE.DepthFormat;
+        this.msaaRenderTarget.depthTexture.type = THREE.UnsignedShortType;
     }
 
     render(world) {
         this.renderer.setRenderTarget(this.msaaRenderTarget);
         this.renderer.clear();
         this.renderer.render(world.scene, world.camera);
-
-        this.renderer.setRenderTarget(this.depthRenderTarget);
-        this.renderer.clear();
-        this.renderer.render(world.depthScene, world.camera);
 
         this.renderer.setRenderTarget(null);
         this.blend.render(this.renderer, this.msaaRenderTarget.texture);
@@ -69,14 +60,16 @@ export class MSAARenderer extends Renderer {
     setSize(w, h) {
         super.setSize(w, h);
         this.msaaRenderTarget.setSize(w, h);
-        this.depthRenderTarget.setSize(w, h);
     }
 
     get depthTexture() {
-        return this.depthRenderTarget.depthTexture;
+        return this.msaaRenderTarget.depthTexture;
     }
 }
 
+/**
+ * Renderer using a super-sampling render pass (SSAA).
+ */
 export class SSAARenderer extends Renderer {
     constructor() {
         super();
