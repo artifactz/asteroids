@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { getRotatedPointVelocity, iteratePointsWorld, pointToLineDistanceSquared } from './geometry/GeometryUtils.js';
-import { LightPool } from './LightPool.js';
+import { PointLightPool } from './LightPool.js';
 import { ParticleParameters } from './Parameters.js';
 
 
@@ -9,12 +9,11 @@ import { ParticleParameters } from './Parameters.js';
  */
 export class ParticleSystem {
     /**
-     * @param {THREE.Scene} scene The scene to which particles will be added.
-     * @param {LightPool} lights Light pool for adding lights for bright particles like sparks.
+     * @param {PointLightPool} lights Light pool for adding lights for bright particles like sparks.
      * @param {THREE.DepthTexture} depthTexture  Particles are rendered separately, so we do z culling manually.
      */
-    constructor(scene, lights, depthTexture) {
-        this.scene = scene;
+    constructor(lights, depthTexture) {
+        this.scene = new THREE.Scene();
         this.lights = lights;
         this.depthTexture = depthTexture;
 

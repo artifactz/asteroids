@@ -1,10 +1,9 @@
 import * as THREE from 'three';
-import { SSAARenderPass } from 'three/examples/jsm/postprocessing/SSAARenderPass.js';
 import { getMousePositionAtZ } from './Targeting.js';
 import { World } from './world/World.js';
-import { SmokeLighting, Blend } from './PostProcessing.js';
 import { initHud, showGameStart, updateFps } from './Hud.js';
 import { GameController } from './GameController.js';
+import { MSAARenderer, SSAARenderer } from './Renderer.js';
 
 
 const clock = new THREE.Clock();
@@ -27,42 +26,9 @@ const fps = {
     }
 }
 
-const renderer = new THREE.WebGLRenderer({
-    canvas: document.getElementById('three-canvas'),
-    antialias: false,
-    powerPreference: "high-performance",
-    logarithmicDepthBuffer: false,
-    precision: "highp"
-});
-renderer.autoClear = false;
-renderer.setSize(window.innerWidth, window.innerHeight);
-
+const renderer = new MSAARenderer();
 initHud();
-
-// Off-screen render target used to access main scene depth buffer (and by SSAA to render samples)
-const ssaaSampleRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
-    format: THREE.RGBAFormat,
-    type: THREE.HalfFloatType,
-    depthBuffer: true,
-});
-ssaaSampleRenderTarget.depthTexture = new THREE.DepthTexture();
-ssaaSampleRenderTarget.depthTexture.format = THREE.DepthFormat;
-ssaaSampleRenderTarget.depthTexture.type = THREE.UnsignedShortType;
-
-// Off-screen render target used to sum up SSAA samples
-const ssaaResultRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
-    format: THREE.RGBAFormat,
-    type: THREE.HalfFloatType,
-    depthBuffer: false,
-});
-
-const world = new World(renderer, ssaaSampleRenderTarget.depthTexture);
-
-const blend = new Blend(THREE.NormalBlending);
-const smokeLighting = new SmokeLighting();
-const ssaa = new SSAARenderPass(world.scene, world.camera);
-ssaa._sampleRenderTarget = ssaaSampleRenderTarget;
-
+const world = new World(renderer.renderer, renderer.depthTexture);
 const controller = new GameController(world);
 
 // === Input ===
@@ -80,30 +46,14 @@ window.addEventListener('resize', () => {
     world.camera.aspect = w / h;
     world.camera.updateProjectionMatrix();
     renderer.setSize(w, h);
-    ssaaSampleRenderTarget.setSize(w, h);
-    ssaaResultRenderTarget.setSize(w, h);
-    smokeLighting.setSize(w, h);
 });
 
-/** Renders world scene and lit smoke. */
-function render(scene, camera) {
-    // Render main scene layer using super-sampling AA (readBuffer argument is only used for buffer sizes)
-    // NOTE: Rendering SSAA directly to the screen (null) looks like it uses incorrect color space
-    ssaa.render(renderer, ssaaResultRenderTarget, ssaaResultRenderTarget);
-
-    // Render result to screen
-    renderer.setRenderTarget(null);
-    blend.render(renderer, ssaaResultRenderTarget.texture);
-
-    // Render smoke on top
-    smokeLighting.render(renderer, scene, camera);
-}
 
 /** Renders an empty scene until models and textures are availabe, then renders loading scenes and starts the game loop. */
 function animateLoading() {
     const scene = new THREE.Scene();
     scene.background = 0x000000;
-    render(scene, world.camera);
+    renderer.render(world);
 
     if (world.particles.smokeTexture && world.player.children.length) {
         // Currently disabled in favor of LightPool
@@ -111,7 +61,7 @@ function animateLoading() {
         //     renderer.compile(scene, world.camera);
         //     render(scene, world.camera);
         // }
-        renderer.compile(world.scene, world.camera);
+        renderer.renderer.compile(world.scene, world.camera);
 
         showGameStart();
         animate();
@@ -127,12 +77,11 @@ function animate() {
     fps.update(dt);
 
     if (mouse.x && mouse.y) {
-        mouse.positionWorld = getMousePositionAtZ(renderer.domElement.getBoundingClientRect(), world.camera, mouse.x, mouse.y, 0);
+        mouse.positionWorld = getMousePositionAtZ(renderer.renderer.domElement.getBoundingClientRect(), world.camera, mouse.x, mouse.y, 0);
     }
 
     controller.update(keys, mouse, dt);
-    render(world.scene, world.camera);
-
+    renderer.render(world);
 }
 
 animateLoading();

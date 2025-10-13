@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 
 /**
- * A pool of lights to reduce the number of shader recompilations by creating new lights in batches.
+ * A pool of PointLights to reduce the number of shader recompilations by creating new lights in batches.
  */
-export class LightPool {
+export class PointLightPool {
     /**
      * @param {THREE.Scene} scene The scene to which lights will be added.
      * @param {number} chunkSize Number of lights to create when extending the pool.

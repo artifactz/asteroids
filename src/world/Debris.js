@@ -29,8 +29,8 @@ const takeFinishDistSq = DebrisParameters.takeFinishDistance * DebrisParameters.
  * * When the player gets close, physics is removed and it is sucked into the player.
  */
 export class DebrisManager {
-    constructor(scene, physics) {
-        this.scene = scene;
+    constructor(physics) {
+        this.scene = new THREE.Scene();
         this.physics = physics;
         const geometries = createDebrisGeometries();
         this.instancedMeshes = [...geometries.map(g => {

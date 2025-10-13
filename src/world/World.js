@@ -12,7 +12,7 @@ import { Sounds } from '../Sounds.js';
 import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
 import { WorldParameters } from '../Parameters.js';
 import { Trail } from './Trail.js';
-import { LightPool } from '../LightPool.js';
+import { PointLightPool } from '../LightPool.js';
 
 // Set up accelerated laser/asteroid collision detection
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -30,19 +30,36 @@ export class World {
     constructor(renderer, depthTexture) {
         this.time = 0;
         this.physics = new Physics();
+
         this.scene = new THREE.Scene();
+        this.depthScene = new THREE.Scene();
+        this.scene.add(this.depthScene);
+
+        this.asteroids = [];
+        this.asteroidScene = new THREE.Scene();
+        this.depthScene.add(this.asteroidScene);
+
+        this.lasers = [];
+        this.laserScene = new THREE.Scene();
+        this.depthScene.add(this.laserScene);
+
         this.clearColor = new THREE.Color(0x000000);
         this.camera = this.createCamera();
         this.addDefaultLights(this.scene);
         this.player = this.createPlayer();
-        this.scene.add(this.player);
+        this.depthScene.add(this.player);
 
-        this.asteroids = [];
-        this.lasers = [];
-        this.lights = new LightPool(this.scene);
-        this.universe = new Universe(this.scene, this.camera, this.lights, renderer);
-        this.debris = new DebrisManager(this.scene, this.physics);
-        this.particles = new ParticleSystem(this.scene, this.lights, depthTexture);
+        this.lights = new PointLightPool(this.scene);
+
+        this.universe = new Universe(this.camera, this.lights, renderer);
+        this.scene.add(this.universe.scene);
+
+        this.debris = new DebrisManager(this.physics);
+        this.depthScene.add(this.debris.scene);
+
+        this.particles = new ParticleSystem(this.lights, depthTexture);
+        this.scene.add(this.particles.scene);
+
         this.trail = new Trail(this.scene, this.player, this.particles);
         this.sounds = new Sounds();
 
@@ -181,7 +198,7 @@ export class World {
 
         this.physics.add(asteroid, { mass: asteroid.userData.volume }, true, physicsEaseInSeconds);
         this.asteroids.push(asteroid);
-        this.scene.add(asteroid);
+        this.asteroidScene.add(asteroid);
     }
 
     /**
@@ -259,7 +276,7 @@ export class World {
 
     removeAsteroid(asteroid) {
         if (asteroid.userData.isRemoved) { return; }
-        this.scene.remove(asteroid);
+        this.asteroidScene.remove(asteroid);
         this.physics.remove(asteroid);
         asteroid.userData.isRemoved = true;
     }
@@ -301,7 +318,7 @@ export class World {
         laser.userData.light = light;
 
         this.lasers.push(laser);
-        this.scene.add(laser);
+        this.laserScene.add(laser);
 
         return laser;
     }
@@ -326,7 +343,7 @@ export class World {
 
     removeLaser(laser) {
         if (laser.userData.isRemoved) { return; }
-        this.scene.remove(laser);
+        this.laserScene.remove(laser);
         this.lights.remove(laser.userData.light);
         laser.userData.isRemoved = true;
     }

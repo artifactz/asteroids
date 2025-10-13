@@ -81,19 +81,24 @@ export class SmokeLighting {
 
     /**
      * Renders scene objects from the specified layer, estimates 2d lighting, and renders them to the screen buffer.
+     * @param {THREE.WebGLRenderer} renderer
+     * @param {THREE.Scene} smokeScene The scene containing smoke/particle objects.
+     * @param {THREE.Scene} lightScene The scene containing PointLight objects.
+     * @param {THREE.Camera} camera
+     * @param {number} layer The scene layer containing smoke/particle objects.
      */
-    render(renderer, scene, camera, layer = 1) {
+    render(renderer, smokeScene, lightScene, camera, layer = 1) {
         renderer.setRenderTarget(this.ping);
         renderer.setClearColor(new THREE.Color(0x000000), 0);  // transparent black
         renderer.clear();
         camera.layers.disable(0);
         camera.layers.enable(layer);
-        renderer.render(scene, camera);
+        renderer.render(smokeScene, camera);
         camera.layers.disable(layer);
         camera.layers.enable(0);
 
         renderer.setRenderTarget(null);
-        this.updateLights(scene, camera);
+        this.updateLights(lightScene, camera);
         renderer.render(this.scene, orthoCam);
     }
 
