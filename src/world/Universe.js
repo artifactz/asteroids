@@ -83,7 +83,7 @@ export class UniverseLayer {
      *                       Results in tiles being generated earlier to avoid pop ins when moving fast.
      * @returns {[left, right, bottom, top]} Tile coordinates of visible area.
      */
-    getVisibleTiles(camera, extra = 0.2) {
+    getVisibleTiles(camera, extra = 1.0) {
         const bottomLeft = projectOnZ(new THREE.Vector3(-1, -1, 0), camera, this.z);
         const topRight = projectOnZ(new THREE.Vector3(1, 1, 0), camera, this.z);
         return [
