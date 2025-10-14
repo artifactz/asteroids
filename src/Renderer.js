@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { SSAARenderPass } from 'three/examples/jsm/postprocessing/SSAARenderPass.js';
 import { SmokeLighting, Blend } from './PostProcessing.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
 
 
 /**
@@ -25,10 +27,14 @@ export class Renderer {
     }
 
     setPipeline(mode) {
-        if (mode == "MSAA") {
+        if (mode == "Disabled") {
+            this.pipeline = new NoAARenderPipeline(this.renderer);
+        } else if (mode == "MSAA") {
             this.pipeline = new MSAARenderPipeline(this.renderer);
         } else if (mode == "SSAA") {
             this.pipeline = new SSAARenderPipeline(this.renderer);
+        } else if (mode == "FXAA") {
+            this.pipeline = new FXAARenderPipeline(this.renderer);
         } else {
             throw new Error(`Unknown render pipeline mode: ${mode}`);
         }
@@ -50,11 +56,44 @@ export class Renderer {
 }
 
 /**
+ * Pipeline without anti-aliasing.
+ */
+class NoAARenderPipeline {
+    constructor(renderer) {
+        this.renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+            format: THREE.RGBAFormat,
+            type: THREE.HalfFloatType,
+            depthBuffer: true,
+        });
+        this.renderTarget.depthTexture = new THREE.DepthTexture();
+        this.renderTarget.depthTexture.format = THREE.DepthFormat;
+        this.renderTarget.depthTexture.type = THREE.UnsignedShortType;
+    }
+
+    render(world, renderer, blend, smokeLighting) {
+        renderer.setRenderTarget(this.renderTarget);
+        renderer.clear();
+        renderer.render(world.scene, world.camera);
+
+        renderer.setRenderTarget(null);
+        blend.render(renderer, this.renderTarget.texture);
+        smokeLighting.render(renderer, world.particles.scene, world.scene, world.camera);
+    }
+
+    setSize(w, h) {
+        this.renderTarget.setSize(w, h);
+    }
+
+    get depthTexture() {
+        return this.renderTarget.depthTexture;
+    }
+}
+
+/**
  * Pipeline using a multi-sample render target (MSAA).
  */
 class MSAARenderPipeline {
     constructor(renderer) {
-        // super();
         const numSamples = Math.min(8, renderer.capabilities.maxSamples);
         this.msaaRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
             format: THREE.RGBAFormat,
@@ -137,5 +176,55 @@ class SSAARenderPipeline {
 
     get depthTexture() {
         return this.sampleRenderTarget.depthTexture;
+    }
+}
+
+/**
+ * Pipeline using FXAA shader pass.
+ */
+class FXAARenderPipeline {
+    constructor(renderer) {
+        this.renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+            format: THREE.RGBAFormat,
+            type: THREE.HalfFloatType,
+            depthBuffer: true,
+        });
+        this.renderTarget.depthTexture = new THREE.DepthTexture();
+        this.renderTarget.depthTexture.format = THREE.DepthFormat;
+        this.renderTarget.depthTexture.type = THREE.UnsignedShortType;
+
+        this.fxaaRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
+            format: THREE.RGBAFormat,
+            type: THREE.HalfFloatType,
+            depthBuffer: false,
+        });
+
+        this.fxaaPass = new ShaderPass(FXAAShader);
+        this.fxaaPass.material.uniforms['resolution'].value.x = 0.5 / window.innerWidth;
+        this.fxaaPass.material.uniforms['resolution'].value.y = 0.5 / window.innerHeight;
+    }
+
+    render(world, renderer, blend, smokeLighting) {
+        renderer.setRenderTarget(this.renderTarget);
+        renderer.clear();
+        renderer.render(world.scene, world.camera);
+
+        this.fxaaPass.render(renderer, this.fxaaRenderTarget, this.renderTarget);
+
+        renderer.setRenderTarget(null);
+        blend.render(renderer, this.fxaaRenderTarget.texture);
+
+        smokeLighting.render(renderer, world.particles.scene, world.scene, world.camera);
+    }
+
+    setSize(w, h) {
+        this.renderTarget.setSize(w, h);
+        this.fxaaRenderTarget.setSize(w, h);
+        this.fxaaPass.material.uniforms['resolution'].value.x = 0.5 / w;
+        this.fxaaPass.material.uniforms['resolution'].value.y = 0.5 / h;
+    }
+
+    get depthTexture() {
+        return this.renderTarget.depthTexture;
     }
 }

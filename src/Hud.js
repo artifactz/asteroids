@@ -37,7 +37,13 @@ export function initHud(onChangedAA) {
     // Antialiasing toggle
     antialiasingText.innerHTML = "Antialiasing: MSAA";
     antialiasingText.addEventListener("click", e => {
-        const newAA = antialiasingText.innerHTML.endsWith("MSAA") ? "SSAA" : "MSAA";
+        const newAA = (antialiasingText.innerHTML.endsWith("MSAA"))
+            ? "SSAA"
+            : (antialiasingText.innerHTML.endsWith("SSAA"))
+                ? "FXAA"
+                : (antialiasingText.innerHTML.endsWith("FXAA"))
+                    ? "Disabled"
+                    : "MSAA";
         antialiasingText.innerHTML = `Antialiasing: ${newAA}`;
         onChangedAA(newAA);
     });
