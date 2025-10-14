@@ -69,6 +69,10 @@ export class World {
         this.biteWorker.onmessage = (message) => { this.handleBiteWorkerResponse(message); };
     }
 
+    setRenderer(renderer) {
+        this.particles.depthTexture = renderer.depthTexture;
+    }
+
     updateTime(dt) {
         this.time += dt;
         this.sounds.updateTime(this.time);

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { showGameOver, showHighscores, showHud, updateMaterial, updateThrustBar } from './Hud.js';
+import { hidePause, showGameOver, showHighscores, showHud, showPause, updateMaterial, updateThrustBar } from './Hud.js';
 import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting.js';
 import { World } from './world/World.js';
 import * as Highscore from './Highscore.js';
@@ -11,6 +11,7 @@ const GameState = {
     Playing: 2,
     GameOverScreen: 3,
     HighscoresScreen: 4,
+    Paused: 5,
 };
 
 export class GameController {
@@ -62,6 +63,16 @@ export class GameController {
                 this.world.player.userData.rotationalVelocity.z = 10.0 * this.playerRotationChange * Math.cos((t - 0.5) * Math.PI);
             }
             this.playerRotationChangeHeat -= dt;
+
+        } else if (this.state == GameState.Playing && keys["escape"]) {
+            keys["escape"] = false;
+            this.state = GameState.Paused;
+            showPause();
+
+        } else if (this.state == GameState.Paused && keys["escape"]) {
+            keys["escape"] = false;
+            this.state = GameState.Playing;
+            hidePause();
 
         } else if (this.state == GameState.Playing && !this.world.player.userData.isAlive) {
             this.state = GameState.GameOverScreen;
@@ -129,15 +140,17 @@ export class GameController {
             this.world.player.userData.laserHeat = this.world.player.userData.laserCooldownPeriod;
         }
 
-        this.world.physics.update(dt);
-        this.world.updateAsteroids(dt);
-        this.world.updateLasers(dt);
-        this.world.updateDebris(dt);
-        this.world.particles.update(dt);
-        this.world.trail.update(this.world.time, dt);
-        this.updateCamera(mouse, this.world.time, dt);
-        this.world.updateUniverse();
-        this.world.lights.update(dt);
+        if (this.state != GameState.Paused) {
+            this.world.physics.update(dt);
+            this.world.updateAsteroids(dt);
+            this.world.updateLasers(dt);
+            this.world.updateDebris(dt);
+            this.world.particles.update(dt);
+            this.world.trail.update(this.world.time, dt);
+            this.updateCamera(mouse, this.world.time, dt);
+            this.world.updateUniverse();
+            this.world.lights.update(dt);
+        }
 
         // Update UI
         if (this.state == GameState.Playing) {

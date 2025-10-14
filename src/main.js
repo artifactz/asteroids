@@ -3,7 +3,7 @@ import { getMousePositionAtZ } from './Targeting.js';
 import { World } from './world/World.js';
 import { initHud, showGameStart, updateFps } from './Hud.js';
 import { GameController } from './GameController.js';
-import { MSAARenderer, SSAARenderer } from './Renderer.js';
+import { Renderer } from './Renderer.js';
 
 
 const clock = new THREE.Clock();
@@ -26,8 +26,11 @@ const fps = {
     }
 }
 
-const renderer = new MSAARenderer();
-initHud();
+const renderer = new Renderer();
+initHud(aa => {
+    renderer.setPipeline(aa);
+    world.setRenderer(renderer);
+});
 const world = new World(renderer.renderer, renderer.depthTexture);
 const controller = new GameController(world);
 

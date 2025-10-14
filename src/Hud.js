@@ -5,6 +5,9 @@ const thrustSegments = [];
 const canvas = document.getElementById('three-canvas');
 const thrustContainer = document.getElementById('thrust-bar-container');
 const gameStartContainer = document.getElementById('game-start-container');
+const pauseContainer = document.getElementById('pause-container');
+const pauseText = document.getElementById('pause-text');
+const antialiasingText = document.getElementById('antialiasing-text');
 const gameOverContainer = document.getElementById('game-over-container');
 const highscoresContainer = document.getElementById('highscores-container');
 const highscoresTable = document.getElementById('highscores-table');
@@ -13,8 +16,12 @@ const materialText = document.getElementById('material-text');
 const fpsText = document.getElementById('fps-text');
 
 
-export function initHud() {
-    // Create segments
+/**
+ * Initializes HUD elements and event handling at startup.
+ * @param {function(string)} onChangedAA Callback when antialiasing mode is changed, parameter is either "MSAA" or "SSAA".
+ */
+export function initHud(onChangedAA) {
+    // Create thrust segments
     for (let i = 0; i < THRUST_NUM_SEGMENTS; i++) {
         const segment = document.createElement('div');
         segment.classList.add('thrust-segment');
@@ -26,6 +33,14 @@ export function initHud() {
         thrustContainer.appendChild(segment);
         thrustSegments.push(segment);
     }
+
+    // Antialiasing toggle
+    antialiasingText.innerHTML = "Antialiasing: MSAA";
+    antialiasingText.addEventListener("click", e => {
+        const newAA = antialiasingText.innerHTML.endsWith("MSAA") ? "SSAA" : "MSAA";
+        antialiasingText.innerHTML = `Antialiasing: ${newAA}`;
+        onChangedAA(newAA);
+    });
 }
 
 let lastThrustSegments = null;
@@ -76,6 +91,17 @@ export function showHud() {
     hideOnFadeout(gameStartContainer);
     thrustContainer.style.display = "flex";
     materialContainer.style.display = "flex";
+}
+
+export function showPause() {
+    pauseContainer.style.display = "block";
+    pauseContainer.classList.add("visible");
+    pauseText.classList.add("visible");
+}
+
+export function hidePause() {
+    pauseContainer.classList.remove("visible");
+    hideOnFadeout(pauseContainer);
 }
 
 export function showGameOver() {

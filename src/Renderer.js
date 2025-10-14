@@ -3,8 +3,10 @@ import { SSAARenderPass } from 'three/examples/jsm/postprocessing/SSAARenderPass
 import { SmokeLighting, Blend } from './PostProcessing.js';
 
 
-/** Base class */
-class Renderer {
+/**
+ * Main renderer class that manages different rendering pipelines (MSAA or SSAA).
+ */
+export class Renderer {
     constructor() {
         this.renderer = new THREE.WebGLRenderer({
             canvas: document.getElementById('three-canvas'),
@@ -18,23 +20,42 @@ class Renderer {
 
         this.blend = new Blend(THREE.NormalBlending);
         this.smokeLighting = new SmokeLighting();
+
+        this.setPipeline("MSAA");
+    }
+
+    setPipeline(mode) {
+        if (mode == "MSAA") {
+            this.pipeline = new MSAARenderPipeline(this.renderer);
+        } else if (mode == "SSAA") {
+            this.pipeline = new SSAARenderPipeline(this.renderer);
+        } else {
+            throw new Error(`Unknown render pipeline mode: ${mode}`);
+        }
+    }
+
+    render(world) {
+        this.pipeline.render(world, this.renderer, this.blend, this.smokeLighting);
     }
 
     setSize(w, h) {
         this.renderer.setSize(w, h);
         this.smokeLighting.setSize(w, h);
+        this.pipeline.setSize(w, h);
     }
 
-    get depthTexture() {}
+    get depthTexture() {
+        return this.pipeline.depthTexture;
+    }
 }
 
 /**
- * Renderer using a multi-sample render target (MSAA).
+ * Pipeline using a multi-sample render target (MSAA).
  */
-export class MSAARenderer extends Renderer {
-    constructor() {
-        super();
-        const numSamples = Math.min(8, this.renderer.capabilities.maxSamples);
+class MSAARenderPipeline {
+    constructor(renderer) {
+        // super();
+        const numSamples = Math.min(8, renderer.capabilities.maxSamples);
         this.msaaRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
             format: THREE.RGBAFormat,
             type: THREE.HalfFloatType,
@@ -46,19 +67,18 @@ export class MSAARenderer extends Renderer {
         this.msaaRenderTarget.depthTexture.type = THREE.UnsignedShortType;
     }
 
-    render(world) {
-        this.renderer.setRenderTarget(this.msaaRenderTarget);
-        this.renderer.clear();
-        this.renderer.render(world.scene, world.camera);
+    render(world, renderer, blend, smokeLighting) {
+        renderer.setRenderTarget(this.msaaRenderTarget);
+        renderer.clear();
+        renderer.render(world.scene, world.camera);
 
-        this.renderer.setRenderTarget(null);
-        this.blend.render(this.renderer, this.msaaRenderTarget.texture);
+        renderer.setRenderTarget(null);
+        blend.render(renderer, this.msaaRenderTarget.texture);
         // TODO do blending in smoke lighting shader to save one rendering step
-        this.smokeLighting.render(this.renderer, world.particles.scene, world.scene, world.camera);
+        smokeLighting.render(renderer, world.particles.scene, world.scene, world.camera);
     }
 
     setSize(w, h) {
-        super.setSize(w, h);
         this.msaaRenderTarget.setSize(w, h);
     }
 
@@ -68,11 +88,10 @@ export class MSAARenderer extends Renderer {
 }
 
 /**
- * Renderer using a super-sampling render pass (SSAA).
+ * Pipeline using a super-sampling render pass (SSAA).
  */
-export class SSAARenderer extends Renderer {
-    constructor() {
-        super();
+class SSAARenderPipeline {
+    constructor(renderer) {
         // Off-screen render target used to render individual SSAA samples and to access the main scene depth buffer
         this.sampleRenderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
             format: THREE.RGBAFormat,
@@ -93,7 +112,7 @@ export class SSAARenderer extends Renderer {
         this.ssaa = null;
     }
 
-    render(world) {
+    render(world, renderer, blend, smokeLighting) {
         if (!this.ssaa) {
             this.ssaa = new SSAARenderPass(world.scene, world.camera);
             this.ssaa._sampleRenderTarget = this.sampleRenderTarget;
@@ -101,18 +120,17 @@ export class SSAARenderer extends Renderer {
 
         // Render main scene layer using super-sampling AA (readBuffer argument is only used for buffer sizes)
         // NOTE: Rendering SSAA directly to the screen (null) looks like it uses incorrect color space
-        this.ssaa.render(this.renderer, this.resultRenderTarget, this.resultRenderTarget);
+        this.ssaa.render(renderer, this.resultRenderTarget, this.resultRenderTarget);
 
         // Render result to screen
-        this.renderer.setRenderTarget(null);
-        this.blend.render(this.renderer, this.resultRenderTarget.texture);
+        renderer.setRenderTarget(null);
+        blend.render(renderer, this.resultRenderTarget.texture);
 
         // Render smoke on top
-        this.smokeLighting.render(this.renderer, world.particles.scene, world.scene, world.camera);
+        smokeLighting.render(renderer, world.particles.scene, world.scene, world.camera);
     }
 
     setSize(w, h) {
-        super.setSize(w, h);
         this.resultRenderTarget.setSize(w, h);
         this.sampleRenderTarget.setSize(w, h);
     }
