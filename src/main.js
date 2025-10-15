@@ -26,10 +26,13 @@ const fps = {
     }
 }
 
-const renderer = new Renderer();
-initHud(aa => {
-    renderer.setPipeline(aa);
+const aaCookie = document.cookie.split('; ').find(row => row.startsWith('antialiasing='));
+const antiAliasing = aaCookie ? aaCookie.split('=')[1] : "MSAA";
+const renderer = new Renderer(antiAliasing);
+initHud(antiAliasing, newAA => {
+    renderer.setPipeline(newAA);
     world.setRenderer(renderer);
+    document.cookie = `antialiasing=${newAA}; path=/; max-age=${60 * 60 * 24 * 365}`; // 1 year
 });
 const world = new World(renderer.renderer, renderer.depthTexture);
 const controller = new GameController(world);

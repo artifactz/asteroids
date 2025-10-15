@@ -21,7 +21,7 @@ const fpsText = document.getElementById('fps-text');
  * Initializes HUD elements and event handling at startup.
  * @param {function(string)} onChangedAA Callback when antialiasing mode is changed, parameter is either "MSAA" or "SSAA".
  */
-export function initHud(onChangedAA) {
+export function initHud(initialAA, onChangedAA) {
     // Create thrust segments
     for (let i = 0; i < THRUST_NUM_SEGMENTS; i++) {
         const segment = document.createElement('div');
@@ -36,7 +36,7 @@ export function initHud(onChangedAA) {
     }
 
     // Antialiasing toggle
-    antialiasingText.innerHTML = "Antialiasing: MSAA";
+    antialiasingText.innerHTML = `Antialiasing: ${initialAA}`;
     antialiasingText.addEventListener("click", e => {
         const newAA = (antialiasingText.innerHTML.endsWith("MSAA"))
             ? "SSAA"

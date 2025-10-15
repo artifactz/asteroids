@@ -9,7 +9,7 @@ import { FXAAShader } from 'three/examples/jsm/shaders/FXAAShader.js';
  * Main renderer class that manages different rendering pipelines (MSAA or SSAA).
  */
 export class Renderer {
-    constructor() {
+    constructor(antiAliasing = "MSAA") {
         this.renderer = new THREE.WebGLRenderer({
             canvas: document.getElementById('three-canvas'),
             antialias: false,
@@ -23,7 +23,7 @@ export class Renderer {
         this.blend = new Blend(THREE.NormalBlending);
         this.smokeLighting = new SmokeLighting();
 
-        this.setPipeline("MSAA");
+        this.setPipeline(antiAliasing);
     }
 
     setPipeline(mode) {
