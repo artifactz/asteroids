@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { NebulaGenerator, NebulaMaterials } from '../Nebula.js'
 import { PointLightPool } from '../LightPool.js';
+import { UniverseParameters } from '../Parameters.js';
 
 const textureLoader = new THREE.TextureLoader()
 const brightStarTexture = textureLoader.load('media/bright_star.png');
@@ -29,7 +30,11 @@ export class Universe {
 
             new UniverseLayer(
                 -50, this.scene, camera,
-                (size) => { return Math.random() < 0.5 ? createBrightStarTextureMesh(size) : null; },
+                (size) => {
+                    return Math.random() < UniverseParameters.brightStarProbabilityPerTile
+                        ? createBrightStarTextureMesh(size)
+                        : null;
+                },
                 () => { return new LightRotatingUniverseTile(lights) }
             ),
 

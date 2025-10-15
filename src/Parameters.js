@@ -68,3 +68,7 @@ export const TrailParameters = {
     deathLightIntensity: 3,
     deathLightIntensityDelta: -2,
 }
+
+export const UniverseParameters = {
+    brightStarProbabilityPerTile: 0.29,
+}
