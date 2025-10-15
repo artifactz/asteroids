@@ -5,6 +5,7 @@ const thrustSegments = [];
 const canvas = document.getElementById('three-canvas');
 const thrustContainer = document.getElementById('thrust-bar-container');
 const gameStartContainer = document.getElementById('game-start-container');
+const tutorialContainer = document.getElementById('tutorial-container');
 const pauseContainer = document.getElementById('pause-container');
 const pauseText = document.getElementById('pause-text');
 const antialiasingText = document.getElementById('antialiasing-text');
@@ -97,6 +98,16 @@ export function showHud() {
     hideOnFadeout(gameStartContainer);
     thrustContainer.style.display = "flex";
     materialContainer.style.display = "flex";
+}
+
+export function showTutorial() {
+    tutorialContainer.style.display = "block";
+    tutorialContainer.classList.add("visible");
+    // Schedule hide
+    setTimeout(() => {
+        tutorialContainer.classList.remove("visible");
+        hideOnFadeout(tutorialContainer);
+    }, 10000);
 }
 
 export function showPause() {

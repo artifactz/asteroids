@@ -1,0 +1,46 @@
+#tutorial-table {
+  position: absolute;
+  bottom: 0;
+}
+
+.tutorial-icon-cell {
+  text-align: center;
+}
+
+.tutorial-text-cell {
+  font-size: 20px;
+  color: #fff8;
+  padding-left: 0.5em;
+}
+
+
+.icon-key {
+  fill: #131313;
+  stroke: #ccc;
+  stroke-width: 4;
+  rx: 8;
+  ry: 8;
+}
+.icon-highlight-key {
+  stroke: #36b4ff;
+  fill: #131320;
+}
+.icon-label {
+  font: bold 24px sans-serif;
+  text-anchor: middle;
+  alignment-baseline: central;
+  fill: #ccc;
+}
+.icon-highlight-label {
+  fill: #36b4ff;
+}
+
+
+.icon-mouse-body {
+  fill: #131313;
+  stroke: #ccc;
+  stroke-width: 4;
+}
+.icon-highlight-button {
+  fill: #36b4ffdd;
+}

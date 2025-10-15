@@ -124,6 +124,25 @@ body {
   color: #36b4ff;
 }
 
+#tutorial-container {
+  display: none;
+  position: absolute;
+  bottom: 0px;
+  left: 240px;
+  width: 400px;
+  height: 300px;
+  font-size: 10px;
+  color: #ccc;
+  /* background-color: magenta; */
+  opacity: 0;
+  transition: opacity 2s ease;
+
+  &.visible {
+    opacity: 1;
+    transition: opacity 2s 3s ease;
+  }
+}
+
 .fullscreen-container {
   display: none;
   position: absolute;
@@ -140,7 +159,6 @@ body {
 
   &.visible {
     opacity: 1;
-    transition: opacity 0.25s linear;
   }
 }
 
@@ -240,6 +258,10 @@ body {
   background-clip: text;
   -webkit-background-clip: text;
   animation: shine 4.2s linear infinite;
+}
+
+#highscores-table-container {
+  background-color: #0006;
 }
 
 #highscores-table {
@@ -384,6 +406,9 @@ input[type="button"]::-moz-focus-inner {
 @starting-style {
   #game-start-container.visible {
     clip-path: inset(0 100% 0 0);
+    opacity: 0;
+  }
+  #tutorial-container.visible {
     opacity: 0;
   }
   #pause-container.visible {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { hidePause, showGameOver, showHighscores, showHud, showPause, updateMaterial, updateThrustBar } from './Hud.js';
+import { hidePause, showGameOver, showHighscores, showHud, showPause, showTutorial, updateMaterial, updateThrustBar } from './Hud.js';
 import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting.js';
 import { World } from './world/World.js';
 import * as Highscore from './Highscore.js';
@@ -48,6 +48,7 @@ export class GameController {
             this.state = GameState.Playing;
             this.isEaseInStage = true;
             showHud();
+            showTutorial();
             this.world.sounds.play("ambient", { loop: true });
 
         } else if (this.state == GameState.StartScreen) {
