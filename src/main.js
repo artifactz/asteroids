@@ -26,8 +26,12 @@ const fps = {
     }
 }
 
+// Firefox doesn't support standard MSAA, and there doesn't seem to be any way to feature detect more specifically
+const isFirefox = typeof InstallTrigger !== 'undefined';
+const defaultAA = (isFirefox) ? "FXAA" : "MSAA";
+// Check for AA setting in cookie
 const aaCookie = document.cookie.split('; ').find(row => row.startsWith('antialiasing='));
-const antiAliasing = aaCookie ? aaCookie.split('=')[1] : "MSAA";
+const antiAliasing = aaCookie ? aaCookie.split('=')[1] : defaultAA;
 const renderer = new Renderer(antiAliasing);
 initHud(antiAliasing, newAA => {
     renderer.setPipeline(newAA);
