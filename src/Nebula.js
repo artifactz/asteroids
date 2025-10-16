@@ -6,6 +6,9 @@ export const NebulaMaterials = {
 }
 
 export class NebulaGenerator {
+    /**
+     * @param {THREE.WebGLRenderer} renderer
+     */
     constructor(renderer) {
         this.renderer = renderer;
         this.scene = new THREE.Scene();
@@ -66,7 +69,7 @@ export class NebulaGenerator {
                 float weightTotal = 0.0;
                 float value = 0.0;
                 for (int i = 0; i < iterations; i++) {
-                    value += weight * perlin(xy + tileCoords, cellSize, seed);
+                    value += weight * perlin(xy + tileCoords, cellSize, seed + float(i));
                     weightTotal += weight;
                     cellSize *= 0.5;
                     weight *= details;
@@ -149,7 +152,7 @@ export class NebulaGenerator {
      * @returns 
      */
     getTile(x, y, resolution = 600, brightness = 1.0, rootCellSize = 1.0, iterations = 8, details = 0.5, density = 0.5, material = NebulaMaterials.PurpleClouds) {
-        const renderTarget = new THREE.WebGLRenderTarget(resolution, resolution, { colorSpace: THREE.SRGBColorSpace });
+        const renderTarget = new THREE.WebGLRenderTarget(resolution, resolution, { colorSpace: THREE.SRGBColorSpace, depthBuffer: false, stencilBuffer: false });
         const materialObj = this.materials[material];
         materialObj.uniforms.brightness.value = brightness;
         materialObj.uniforms.rootCellSize.value = rootCellSize;
@@ -160,7 +163,6 @@ export class NebulaGenerator {
         this.quad.material = materialObj;
         this.renderer.setRenderTarget(renderTarget);
         this.renderer.render(this.scene, this.camera);
-        this.renderer.setRenderTarget(null);
         return renderTarget.texture;
     }
 }
