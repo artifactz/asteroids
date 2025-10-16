@@ -71,4 +71,12 @@ export const TrailParameters = {
 
 export const UniverseParameters = {
     brightStarProbabilityPerTile: 0.29,
+
+    /**
+     * How many universe tiles beyond screen borders to consider visible. Higher values avoid pop-ins and flickering
+     * because there's more time to finish texture upload etc. Lower values increase overall performance because less
+     * tiles are rendered. This parameter is cruicial on slower machines, esp. during the fast movement in the title
+     * screen.
+     */
+    preloadSize: 0.5,
 }
