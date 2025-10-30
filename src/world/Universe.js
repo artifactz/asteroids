@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { NebulaGenerator, NebulaMaterials } from '../Nebula.js'
 import { PointLightPool } from '../LightPool.js';
 import { UniverseParameters } from '../Parameters.js';
+import { Tiles2D } from '../Types.js';
 
 const textureLoader = new THREE.TextureLoader()
 const brightStarTexture = textureLoader.load('media/bright_star.png');
@@ -78,7 +79,7 @@ export class UniverseLayer {
         this.tileFactory = tileFactory;
         const depth = -z + camera.position.z;
         this.tileSize = 2 * Math.tan(0.5 * camera.fov / 180 * Math.PI) * depth;
-        this.tiles = new Map();
+        this.tiles = new Tiles2D();
         this.lastVisibleTiles = null;
     }
 
@@ -86,16 +87,16 @@ export class UniverseLayer {
      * @param {THREE.Camera} camera 
      * @param {number} extra Size of margin beyond visible area to add to result.
      *                       Results in tiles being generated earlier to avoid pop ins when moving fast.
-     * @returns {[left, right, bottom, top]} Tile coordinates of visible area.
+     * @returns {[x0, x1, y0, y1]} Tile coordinates of visible area.
      */
-    getVisibleTiles(camera, extra = 0) {
-        const bottomLeft = projectOnZ(new THREE.Vector3(-1, -1, 0), camera, this.z);
-        const topRight = projectOnZ(new THREE.Vector3(1, 1, 0), camera, this.z);
+    getVisibleRect(camera, extra = 0) {
+        const negativeCorner = projectOnZ(new THREE.Vector3(-1, -1, 0), camera, this.z);
+        const positiveCorner = projectOnZ(new THREE.Vector3(1, 1, 0), camera, this.z);
         return [
-            Math.round(bottomLeft.x / this.tileSize - extra),
-            Math.round(topRight.x / this.tileSize + extra),
-            Math.round(bottomLeft.y / this.tileSize - extra),
-            Math.round(topRight.y / this.tileSize + extra)
+            Math.round(negativeCorner.x / this.tileSize - extra),
+            Math.round(positiveCorner.x / this.tileSize + extra),
+            Math.round(negativeCorner.y / this.tileSize - extra),
+            Math.round(positiveCorner.y / this.tileSize + extra)
         ];
     }
 
@@ -103,57 +104,50 @@ export class UniverseLayer {
      * Updates visible tiles based on camera position.
      */
     update(camera) {
-        const [left, right, bottom, top] = this.getVisibleTiles(camera, UniverseParameters.preloadSize);
+        const [x0, x1, y0, y1] = this.getVisibleRect(camera, UniverseParameters.preloadSize);
 
         if (this.lastVisibleTiles) {
             // Disable tiles that are no longer visible
-            const [lastLeft, lastRight, lastBottom, lastTop] = this.lastVisibleTiles;
-            for (let col = lastLeft; col < lastRight + 1; col++) {
-                for (let row = lastBottom; row < lastTop + 1; row++) {
-                    if (col < left || col > right || row < bottom || row > top) {
-                        this.disableTile(row, col);
-                    }
+            const [lastX0, lastX1, lastY0, lastY1] = this.lastVisibleTiles;
+            for (const [x, y] of Tiles2D.iterRect(lastX0, lastX1, lastY0, lastY1)) {
+                if (x < x0 || x > x1 || y < y0 || y > y1) {
+                    this.disableTile(x, y);
                 }
             }
         }
 
         // Enable tiles that are now visible
-        for (let col = left; col < right + 1; col++) {
-            for (let row = bottom; row < top + 1; row++) {
-                this.enableTile(row, col);
-                const tile = this.tiles.get(row + "," + col);
-                if (tile.update) { tile.update(camera); }
-            }
+        for (const [x, y] of Tiles2D.iterRect(x0, x1, y0, y1)) {
+            this.enableTile(x, y);
+            const tile = this.tiles.get(x, y);
+            if (tile.update) { tile.update(camera); }
         }
 
-        this.lastVisibleTiles = [left, right, bottom, top];
+        this.lastVisibleTiles = [x0, x1, y0, y1];
     }
 
-    disableTile(row, col) {
-        const id = row + "," + col;
-        const tile = this.tiles.get(id);
+    disableTile(x, y) {
+        const tile = this.tiles.get(x, y);
         if (!tile || !tile.visible) { return; }
         if (tile.mesh) { this.scene.remove(tile.mesh); }
         if (tile.disable) { tile.disable(); }
         tile.visible = false;
-        // console.log("Disabled tile " + id + " at z=" + this.z);
+        // console.log("Disabled tile " + x + ", " + y + " at z=" + this.z);
     }
 
-    enableTile(row, col) {
-        const id = row + "," + col;
-        if (!this.tiles.has(id)) {
-            // console.log("Generating tile " + id + " at z=" + this.z);
+    enableTile(x, y) {
+        if (!this.tiles.has(x, y)) {
             const tile = this.tileFactory();
-            this.tiles.set(id, tile);
-            const mesh = this.meshFactory(this.tileSize, col, row);
+            this.tiles.set(x, y, tile);
+            const mesh = this.meshFactory(this.tileSize, x, y);
             if (mesh) {
-                mesh.position.add(new THREE.Vector3(col * this.tileSize, row * this.tileSize, this.z));
+                mesh.position.add(new THREE.Vector3(x * this.tileSize, y * this.tileSize, this.z));
                 tile.mesh = mesh;
                 this.scene.add(tile.mesh);
             }
             if (tile.enable) { tile.enable(); }
-        } else if (!this.tiles.get(id).visible) {
-            const tile = this.tiles.get(id);
+        } else if (!this.tiles.get(x, y).visible) {
+            const tile = this.tiles.get(x, y);
             if (tile.mesh) { this.scene.add(tile.mesh); }
             if (tile.enable) { tile.enable(); }
             tile.visible = true;

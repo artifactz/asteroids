@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { getMousePositionAtZ } from './Targeting.js';
 import { World } from './world/World.js';
-import { initHud, showGameStart, updateFps } from './Hud.js';
+import { initHud, showGameStart, updateFps } from './ui/Hud.js';
 import { GameController } from './GameController.js';
 import { Renderer } from './Renderer.js';
+import { Station } from './world/Station.js';
 
 
 const clock = new THREE.Clock();
@@ -65,7 +66,7 @@ function animateLoading() {
     scene.background = 0x000000;
     renderer.render(world);
 
-    if (world.particles.smokeTexture && world.player.children.length) {
+    if (world.particles.smokeTexture && world.player.children.length && Station.modelScene) {
         // Currently disabled in favor of LightPool
         // for (const scene of world.loadingScenes()) {
         //     renderer.compile(scene, world.camera);
@@ -92,6 +93,7 @@ function animate() {
 
     controller.update(keys, mouse, dt);
     renderer.render(world);
+    controller.postRenderUpdate(keys);
 }
 
 animateLoading();

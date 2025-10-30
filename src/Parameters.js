@@ -10,6 +10,8 @@ export const GameControllerParameters = {
     startScreenPlayerSpeed: 40,
     gameOverDuration: 2,
     highscoresTimeout: 7,
+    pingDuration: 5,
+    pingFadeoutDuration: 1.0,  // higher than css transition duration to avoid timing issues with 'transitioned' event
 }
 
 export const AsteroidParameters = {
@@ -79,4 +81,10 @@ export const UniverseParameters = {
      * screen.
      */
     preloadSize: 0.5,
+}
+
+export const StationParameters = {
+    gridResolution: 400,
+    suspendSpawnRadius: 30,
+    asteroidRepelForce: 4,
 }

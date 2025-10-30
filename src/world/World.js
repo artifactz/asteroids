@@ -13,6 +13,7 @@ import { addBarycentricCoordinates } from '../geometry/GeometryUtils.js';
 import { WorldParameters } from '../Parameters.js';
 import { Trail } from './Trail.js';
 import { PointLightPool } from '../LightPool.js';
+import { Stations } from './Station.js';
 
 // Set up accelerated laser/asteroid collision detection
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -48,6 +49,8 @@ export class World {
         this.addDefaultLights(this.scene);
         this.player = this.createPlayer();
         this.depthScene.add(this.player);
+        this.stations = new Stations();
+        this.depthScene.add(this.stations.scene);
 
         this.lights = new PointLightPool(this.scene);
 

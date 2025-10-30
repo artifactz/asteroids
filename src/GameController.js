@@ -1,6 +1,7 @@
 import * as THREE from 'three';
-import { hidePause, showGameOver, showHighscores, showHud, showPause, showTutorial, updateMaterial, updateThrustBar } from './Hud.js';
-import { fixCameraOnPlayer, moveCamera, rotateTowards } from './Targeting.js';
+import { hidePause, showGameOver, showHighscores, showHud, showPause, showTutorial, updateMaterial, updateThrustBar } from './ui/Hud.js';
+import { hidePingArrow, showPingArrow, updatePingArrow } from './ui/Ping.js';
+import { fixCameraOnPlayer, moveCamera, rotateTowards, worldToScreen } from './Targeting.js';
 import { World } from './world/World.js';
 import * as Highscore from './Highscore.js';
 import { GameControllerParameters } from './Parameters.js'
@@ -29,6 +30,7 @@ export class GameController {
         this.asteroidSpawnProbability = 10.0; // resets to 0 at every spawn
         this.gameOverTimestamp = null; // avoids accidentally skipping Game Over screen when clicking furiously
         this.hasClickedGameOver = false; // handles delaying transition until receiving highscores
+        this.pingController = new PingController(this);
 
         // Prepare start screen
         this.originalPlayerMaxSpeed = world.player.userData.maxSpeed;
@@ -129,7 +131,9 @@ export class GameController {
         }
 
         this.world.updateTime(dt);
-        this.world.updatePlayer(dt);
+        if (this.state == GameState.Playing) {
+            this.world.stations.update(this.world, dt);
+        }
 
         this.maybeSpawnAsteroid(dt);
         this.steerAsteroids(dt);
@@ -143,6 +147,7 @@ export class GameController {
 
         if (this.state != GameState.Paused) {
             this.world.physics.update(dt);
+            this.world.updatePlayer(dt);
             this.world.updateAsteroids(dt);
             this.world.updateLasers(dt);
             this.world.updateDebris(dt);
@@ -164,6 +169,11 @@ export class GameController {
         }
 
         this.prevState = this.state;
+    }
+
+    /** Updates world-relative UI. */
+    postRenderUpdate(keys) {
+        this.pingController.update(keys);
     }
 
     updateCamera(mouse, time, dt) {
@@ -242,6 +252,44 @@ export class GameController {
     }
 }
 
+class PingController {
+    constructor(gameController) {
+        this.gameController = gameController;
+        this.timestamp = -9000;
+        this.isActive = false;
+        this.isFadeout = false;
+    }
+
+    update(keys) {
+        if (this.gameController.state != GameState.Playing) { return; }
+
+        const world = this.gameController.world;
+
+        if (!this.isActive && !this.isFadeout && keys[" "] && !world.stations.empty()) {
+            this.timestamp = world.time;
+            this.isActive = true;
+            showPingArrow();
+        }
+
+        if (this.isActive && !this.isFadeout && world.time > this.timestamp + GameControllerParameters.pingDuration) {
+            this.isActive = false;
+            this.isFadeout = true;
+            hidePingArrow();
+        }
+
+        if (this.isActive || this.isFadeout) {
+            const center = worldToScreen(world.camera, world.player.position);
+            const stationPosition = world.stations.closest(world.player.position).scene.position;
+            const angle = Math.atan2(stationPosition.y - world.player.position.y, stationPosition.x - world.player.position.x);
+            updatePingArrow(center, -angle);
+        }
+
+        if (world.time > this.timestamp + GameControllerParameters.pingDuration + GameControllerParameters.pingFadeoutDuration) {
+            this.isFadeout = false;
+        }
+    }
+}
+
 class Behavior {
     act(dt) {}
 }
@@ -251,9 +299,14 @@ class ApproachPlayerBehavior /*extends Behavior*/ {
         this.asteroid = asteroid;
         this.world = world;
         this.speed = speed;
+        this.suspended = false;
     }
 
     act(dt) {
+        if (this.suspended) {
+            return;
+        }
+
         const target = this.world.player;
         let point = target.position.clone();
 
@@ -296,9 +349,14 @@ class CrashPlayerBehavior /*extends Behavior*/ {
     constructor(asteroid, world) {
         this.asteroid = asteroid;
         this.world = world;
+        this.suspended = false;
     }
 
     act(dt) {
+        if (this.suspended) {
+            return;
+        }
+
         const target = this.world.player;
         if (target.position.clone().sub(this.asteroid.position).lengthSq() < 20 * 20) {
             // Don't act

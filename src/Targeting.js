@@ -26,6 +26,22 @@ export function getMousePositionAtZ(canvasRect, camera, mouseX, mouseY, worldZ) 
     return new THREE.Vector3(camera.position.x + t * mouseRay.x, camera.position.y + t * mouseRay.y, worldZ);
 }
 
+/**
+ * Calculates the given world position in screen coordinates.
+ * @param {THREE.Camera} camera
+ * @param {THREE.Vector3} worldPosition
+ * @returns {THREE.Vector2}
+ */
+export function worldToScreen(camera, worldPosition) {
+    worldToScreen.canvas = worldToScreen.canvas || document.getElementById('three-canvas');
+    const canvasRect = worldToScreen.canvas.getBoundingClientRect();
+    const projected = worldPosition.clone().project(camera);
+    return new THREE.Vector2(
+        ((projected.x + 1) / 2) * canvasRect.width + canvasRect.left,
+        ((-projected.y + 1) / 2) * canvasRect.height + canvasRect.top
+    );
+}
+
 
 export function rotateTowards(actor, point, dt) {
     const targetOrientation = Math.atan2(point.y - actor.position.y, point.x - actor.position.x);

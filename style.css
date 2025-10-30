@@ -86,6 +86,22 @@ body {
   margin-left: 0.5em;
 }
 
+#ping-arrow-container {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translateX(-50%) translateY(-50%);
+  font-size: 20px;
+  color: #ccc;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+
+  &.visible {
+    opacity: 0.5;
+  }
+}
+
 #game-start-container {
   display: none;
   position: absolute;
@@ -421,6 +437,9 @@ input[type="button"]::-moz-focus-inner {
     opacity: 0;
   }
   #highscores-container.visible {
+    opacity: 0;
+  }
+  #ping-arrow-container.visible {
     opacity: 0;
   }
 }
